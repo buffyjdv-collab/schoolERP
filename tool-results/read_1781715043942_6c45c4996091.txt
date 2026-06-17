@@ -1,0 +1,582 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState } from 'react'
+     4→     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→     5→import { api } from '@/lib/api'
+     6→     6→import type { AdmissionEnquiry, Application } from '@/lib/types'
+     7→     7→import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
+     8→     8→import {
+     9→     9→  Card, CardContent, CardHeader, CardTitle,
+    10→    10→} from '@/components/ui/card'
+    11→    11→import { Button } from '@/components/ui/button'
+    12→    12→import { Input } from '@/components/ui/input'
+    13→    13→import { Label } from '@/components/ui/label'
+    14→    14→import { Textarea } from '@/components/ui/textarea'
+    15→    15→import { Badge } from '@/components/ui/badge'
+    16→    16→import { Skeleton } from '@/components/ui/skeleton'
+    17→    17→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    18→    18→import {
+    19→    19→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    20→    20→} from '@/components/ui/table'
+    21→    21→import {
+    22→    22→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
+    23→    23→} from '@/components/ui/dialog'
+    24→    24→import {
+    25→    25→  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+    26→    26→} from '@/components/ui/select'
+    27→    27→import {
+    28→    28→  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
+    29→    29→} from '@/components/ui/dropdown-menu'
+    30→    30→import {
+    31→    31→  UserPlus, ClipboardList, FileCheck2, Percent, Search, MoreHorizontal,
+    32→    32→  ChevronRight, Mail, MessageSquare, CheckCircle2,
+    33→    33→  ClipboardCheck, CalendarClock, Ban, FileText, GraduationCap,
+    34→    34→} from 'lucide-react'
+    35→    35→import { toast } from 'sonner'
+    36→    36→
+    37→    37→const CLASSES = Array.from({ length: 10 }, (_, i) => `Class ${i + 1}`)
+    38→    38→const SOURCES = ['Website', 'Walk-in', 'Referral'] as const
+    39→    39→
+    40→    40→// Pipeline stages (ordered)
+    41→    41→const PIPELINE = [
+    42→    42→  { key: 'Enquiry', label: 'Enquiry', color: 'bg-sky-500/10 text-sky-600 dark:text-sky-400', dot: 'bg-sky-500' },
+    43→    43→  { key: 'Application', label: 'Application', color: 'bg-violet-500/10 text-violet-600 dark:text-violet-400', dot: 'bg-violet-500' },
+    44→    44→  { key: 'Test', label: 'Test / Assessment', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', dot: 'bg-amber-500' },
+    45→    45→  { key: 'Interview', label: 'Interview', color: 'bg-teal-500/10 text-teal-600 dark:text-teal-400', dot: 'bg-teal-500' },
+    46→    46→  { key: 'Approved', label: 'Approved', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
+    47→    47→] as const
+    48→    48→
+    49→    49→// Enquiry status progression
+    50→    50→const ENQUIRY_FLOW: Record<string, string | null> = {
+    51→    51→  Enquiry: 'Application',
+    52→    52→  Application: 'Test',
+    53→    53→  Test: 'Interview',
+    54→    54→  Interview: 'Approved',
+    55→    55→  Approved: null,
+    56→    56→  Rejected: null,
+    57→    57→}
+    58→    58→
+    59→    59→const APPLICATION_FLOW: Record<string, string | null> = {
+    60→    60→  Submitted: 'Verified',
+    61→    61→  Verified: 'TestScheduled',
+    62→    62→  TestScheduled: 'Approved',
+    63→    63→  Approved: null,
+    64→    64→  Rejected: null,
+    65→    65→}
+    66→    66→
+    67→    67→function fmtDate(iso: string) {
+    68→    68→  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    69→    69→}
+    70→    70→
+    71→    71→function initials(name: string) {
+    72→    72→  return name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
+    73→    73→}
+    74→    74→
+    75→    75→// ============ New Enquiry Dialog ============
+    76→    76→function NewEnquiryDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+    77→    77→  const qc = useQueryClient()
+    78→    78→  const [form, setForm] = useState({
+    79→    79→    studentName: '', parentName: '', phone: '', email: '',
+    80→    80→    classApplied: 'Class 1', source: 'Website' as (typeof SOURCES)[number], message: '',
+    81→    81→  })
+    82→    82→
+    83→    83→  const createMut = useMutation({
+    84→    84→    mutationFn: (data: typeof form) => api.admissions.createEnquiry(data),
+    85→    85→    onSuccess: () => {
+    86→    86→      toast.success('Enquiry captured', { description: 'A new admission enquiry has been logged.' })
+    87→    87→      qc.invalidateQueries({ queryKey: ['admissions', 'enquiries'] })
+    88→    88→      onOpenChange(false)
+    89→    89→      setForm({ studentName: '', parentName: '', phone: '', email: '', classApplied: 'Class 1', source: 'Website', message: '' })
+    90→    90→    },
+    91→    91→    onError: () => toast.error('Failed to create enquiry'),
+    92→    92→  })
+    93→    93→
+    94→    94→  const valid = form.studentName.trim() && form.parentName.trim() && form.phone.trim()
+    95→    95→
+    96→    96→  return (
+    97→    97→    <Dialog open={open} onOpenChange={onOpenChange}>
+    98→    98→      <DialogContent className="sm:max-w-lg">
+    99→    99→        <DialogHeader>
+   100→   100→          <DialogTitle className="flex items-center gap-2"><UserPlus className="size-4 text-primary" /> New Admission Enquiry</DialogTitle>
+   101→   101→          <DialogDescription>Capture a prospective parent&rsquo;s admission enquiry. This enters the Enquiry stage of the pipeline.</DialogDescription>
+   102→   102→        </DialogHeader>
+   103→   103→
+   104→   104→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   105→   105→          <div className="space-y-1.5">
+   106→   106→            <Label htmlFor="ne-student">Student Name *</Label>
+   107→   107→            <Input id="ne-student" value={form.studentName} onChange={(e) => setForm({ ...form, studentName: e.target.value })} placeholder="e.g. Aarav Sharma" />
+   108→   108→          </div>
+   109→   109→          <div className="space-y-1.5">
+   110→   110→            <Label htmlFor="ne-parent">Parent / Guardian *</Label>
+   111→   111→            <Input id="ne-parent" value={form.parentName} onChange={(e) => setForm({ ...form, parentName: e.target.value })} placeholder="e.g. Rajesh Sharma" />
+   112→   112→          </div>
+   113→   113→          <div className="space-y-1.5">
+   114→   114→            <Label htmlFor="ne-phone">Phone *</Label>
+   115→   115→            <Input id="ne-phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+91 98765 43210" />
+   116→   116→          </div>
+   117→   117→          <div className="space-y-1.5">
+   118→   118→            <Label htmlFor="ne-email">Email</Label>
+   119→   119→            <Input id="ne-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="parent@example.com" />
+   120→   120→          </div>
+   121→   121→          <div className="space-y-1.5">
+   122→   122→            <Label>Class Applied</Label>
+   123→   123→            <Select value={form.classApplied} onValueChange={(v) => setForm({ ...form, classApplied: v })}>
+   124→   124→              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+   125→   125→              <SelectContent>
+   126→   126→                {CLASSES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+   127→   127→              </SelectContent>
+   128→   128→            </Select>
+   129→   129→          </div>
+   130→   130→          <div className="space-y-1.5">
+   131→   131→            <Label>Source</Label>
+   132→   132→            <Select value={form.source} onValueChange={(v) => setForm({ ...form, source: v as (typeof SOURCES)[number] })}>
+   133→   133→              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+   134→   134→              <SelectContent>
+   135→   135→                {SOURCES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+   136→   136→              </SelectContent>
+   137→   137→            </Select>
+   138→   138→          </div>
+   139→   139→          <div className="space-y-1.5 sm:col-span-2">
+   140→   140→            <Label htmlFor="ne-msg">Message / Notes</Label>
+   141→   141→            <Textarea id="ne-msg" value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} placeholder="Any specific query from the parent…" rows={3} />
+   142→   142→          </div>
+   143→   143→        </div>
+   144→   144→
+   145→   145→        <DialogFooter>
+   146→   146→          <DialogClose asChild>
+   147→   147→            <Button variant="outline">Cancel</Button>
+   148→   148→          </DialogClose>
+   149→   149→          <Button onClick={() => createMut.mutate(form)} disabled={!valid || createMut.isPending} className="gap-1.5">
+   150→   150→            {createMut.isPending ? <CheckCircle2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+   151→   151→            Create Enquiry
+   152→   152→          </Button>
+   153→   153→        </DialogFooter>
+   154→   154→      </DialogContent>
+   155→   155→    </Dialog>
+   156→   156→  )
+   157→   157→}
+   158→   158→
+   159→   159→// ============ Pipeline overview tab ============
+   160→   160→function PipelineOverview({
+   161→   161→  enquiries, applications, onNew,
+   162→   162→}: {
+   163→   163→  enquiries: AdmissionEnquiry[]
+   164→   164→  applications: Application[]
+   165→   165→  onNew: () => void
+   166→   166→}) {
+   167→   167→  // Compute counts per pipeline stage by combining enquiries + applications statuses
+   168→   168→  const count = (stage: string) => {
+   169→   169→    const e = enquiries.filter((x) => x.status === stage).length
+   170→   170→    let a = 0
+   171→   171→    if (stage === 'Application') a = applications.filter((x) => x.status === 'Submitted' || x.status === 'Verified').length
+   172→   172→    if (stage === 'Test') a = applications.filter((x) => x.status === 'TestScheduled').length
+   173→   173→    if (stage === 'Approved') a = applications.filter((x) => x.status === 'Approved').length
+   174→   174→    return e + a
+   175→   175→  }
+   176→   176→  const total = enquiries.length + applications.length
+   177→   177→  const rejected = enquiries.filter((e) => e.status === 'Rejected').length + applications.filter((a) => a.status === 'Rejected').length
+   178→   178→
+   179→   179→  return (
+   180→   180→    <div className="space-y-6">
+   181→   181→      <Card>
+   182→   182→        <CardHeader className="pb-3">
+   183→   183→          <div className="flex items-start justify-between gap-3">
+   184→   184→            <div>
+   185→   185→              <CardTitle className="text-base flex items-center gap-2"><ClipboardList className="size-4 text-primary" /> Admission Pipeline</CardTitle>
+   186→   186→              <p className="text-xs text-muted-foreground mt-1">Live stages from initial enquiry through to enrolment. Click &ldquo;New Enquiry&rdquo; to capture a lead.</p>
+   187→   187→            </div>
+   188→   188→            <Button size="sm" className="gap-1.5" onClick={onNew}><UserPlus className="size-4" /> New Enquiry</Button>
+   189→   189→          </div>
+   190→   190→        </CardHeader>
+   191→   191→        <CardContent>
+   192→   192→          {/* Pipeline visualization */}
+   193→   193→          <div className="flex flex-col lg:flex-row items-stretch gap-3 lg:gap-0">
+   194→   194→            {PIPELINE.map((stage, idx) => {
+   195→   195→              const n = count(stage.key)
+   196→   196→              const pct = total ? Math.round((n / total) * 100) : 0
+   197→   197→              return (
+   198→   198→                <div key={stage.key} className="flex items-center gap-3 lg:gap-0 flex-1 min-w-0">
+   199→   199→                  <div className={`relative flex-1 rounded-xl border p-4 lg:p-5 transition-all hover:shadow-md ${idx === PIPELINE.length - 1 ? 'border-emerald-500/30' : 'border-border'}`}>
+   200→   200→                    <div className="flex items-center justify-between gap-2 mb-2">
+   201→   201→                      <div className={`size-8 rounded-lg grid place-items-center ${stage.color}`}>
+   202→   202→                        <span className="text-xs font-bold">{idx + 1}</span>
+   203→   203→                      </div>
+   204→   204→                      <Badge variant="secondary" className="text-[10px] tabular-nums">{pct}%</Badge>
+   205→   205→                    </div>
+   206→   206→                    <p className="text-xs font-medium text-muted-foreground">{stage.label}</p>
+   207→   207→                    <p className="text-2xl font-bold tabular-nums mt-0.5">{n}</p>
+   208→   208→                  </div>
+   209→   209→                  {idx < PIPELINE.length - 1 && (
+   210→   210→                    <ChevronRight className="size-5 text-muted-foreground/50 mx-1 lg:mx-2 shrink-0 rotate-90 lg:rotate-0" />
+   211→   211→                  )}
+   212→   212→                </div>
+   213→   213→              )
+   214→   214→            })}
+   215→   215→          </div>
+   216→   216→
+   217→   217→          {/* Rejected / totals strip */}
+   218→   218→          <div className="flex flex-wrap items-center gap-3 mt-5 pt-4 border-t">
+   219→   219→            <div className="flex items-center gap-2 text-xs">
+   220→   220→              <span className={`size-2 rounded-full ${PIPELINE[0].dot}`} />
+   221→   221→              <span className="text-muted-foreground">Total Leads</span>
+   222→   222→              <span className="font-semibold tabular-nums">{total}</span>
+   223→   223→            </div>
+   224→   224→            <div className="flex items-center gap-2 text-xs">
+   225→   225→              <span className="size-2 rounded-full bg-rose-500" />
+   226→   226→              <span className="text-muted-foreground">Rejected</span>
+   227→   227→              <span className="font-semibold tabular-nums">{rejected}</span>
+   228→   228→            </div>
+   229→   229→            <div className="flex items-center gap-2 text-xs">
+   230→   230→              <span className="size-2 rounded-full bg-emerald-500" />
+   231→   231→              <span className="text-muted-foreground">Conversion</span>
+   232→   232→              <span className="font-semibold tabular-nums">{total ? Math.round((count('Approved') / total) * 100) : 0}%</span>
+   233→   233→            </div>
+   234→   234→          </div>
+   235→   235→        </CardContent>
+   236→   236→      </Card>
+   237→   237→
+   238→   238→      {/* Recent activity feed */}
+   239→   239→      <Card>
+   240→   240→        <CardHeader className="pb-3">
+   241→   241→          <CardTitle className="text-base flex items-center gap-2"><MessageSquare className="size-4 text-primary" /> Recent Enquiries</CardTitle>
+   242→   242→        </CardHeader>
+   243→   243→        <CardContent>
+   244→   244→          {enquiries.length === 0 ? (
+   245→   245→            <EmptyState icon={ClipboardList} title="No enquiries yet" description="Create your first admission enquiry to populate the pipeline." />
+   246→   246→          ) : (
+   247→   247→            <div className="space-y-2 max-h-80 overflow-y-auto scroll-thin pr-1">
+   248→   248→              {enquiries.slice(0, 8).map((e) => (
+   249→   249→                <div key={e.id} className="flex items-start gap-3 py-2 border-b last:border-0">
+   250→   250→                  <div className="size-9 rounded-full bg-primary/10 text-primary grid place-items-center text-xs font-semibold shrink-0">{initials(e.studentName)}</div>
+   251→   251→                  <div className="flex-1 min-w-0">
+   252→   252→                    <div className="flex items-center justify-between gap-2">
+   253→   253→                      <p className="font-medium text-sm truncate">{e.studentName}</p>
+   254→   254→                      <StatusBadge status={e.status} />
+   255→   255→                    </div>
+   256→   256→                    <p className="text-xs text-muted-foreground truncate">{e.parentName} · {e.phone} · {e.classApplied}</p>
+   257→   257→                    <p className="text-[11px] text-muted-foreground mt-0.5">{fmtDate(e.createdAt)} · via {e.source}</p>
+   258→   258→                  </div>
+   259→   259→                </div>
+   260→   260→              ))}
+   261→   261→            </div>
+   262→   262→          )}
+   263→   263→        </CardContent>
+   264→   264→      </Card>
+   265→   265→    </div>
+   266→   266→  )
+   267→   267→}
+   268→   268→
+   269→   269→// ============ Enquiries table ============
+   270→   270→function EnquiriesTable({ enquiries }: { enquiries: AdmissionEnquiry[] }) {
+   271→   271→  const qc = useQueryClient()
+   272→   272→  const [q, setQ] = useState('')
+   273→   273→
+   274→   274→  const updateMut = useMutation({
+   275→   275→    mutationFn: ({ id, status }: { id: string; status: string }) => api.admissions.updateEnquiry(id, { status }),
+   276→   276→    onSuccess: (_data, vars) => {
+   277→   277→      toast.success(`Status updated to ${vars.status}`)
+   278→   278→      qc.invalidateQueries({ queryKey: ['admissions', 'enquiries'] })
+   279→   279→    },
+   280→   280→    onError: () => toast.error('Failed to update status'),
+   281→   281→  })
+   282→   282→
+   283→   283→  const filtered = enquiries.filter((e) => {
+   284→   284→    if (!q) return true
+   285→   285→    const s = q.toLowerCase()
+   286→   286→    return e.studentName.toLowerCase().includes(s) || e.phone.includes(s) || e.parentName.toLowerCase().includes(s)
+   287→   287→  })
+   288→   288→
+   289→   289→  return (
+   290→   290→    <Card>
+   291→   291→      <CardHeader className="pb-3">
+   292→   292→        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+   293→   293→          <div>
+   294→   294→            <CardTitle className="text-base">Enquiries</CardTitle>
+   295→   295→            <p className="text-xs text-muted-foreground mt-1">{filtered.length} record{filtered.length !== 1 ? 's' : ''}{q ? ` matching "${q}"` : ''}</p>
+   296→   296→          </div>
+   297→   297→          <div className="relative w-full sm:w-72">
+   298→   298→            <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+   299→   299→            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or phone…" className="pl-9" />
+   300→   300→          </div>
+   301→   301→        </div>
+   302→   302→      </CardHeader>
+   303→   303→      <CardContent className="px-0">
+   304→   304→        {filtered.length === 0 ? (
+   305→   305→          <div className="px-6 pb-2"><EmptyState icon={ClipboardList} title="No enquiries found" description={q ? 'Try a different search term.' : 'New enquiries will appear here.'} /></div>
+   306→   306→        ) : (
+   307→   307→          <div className="max-h-[60vh] overflow-y-auto scroll-thin">
+   308→   308→            <Table>
+   309→   309→              <TableHeader className="sticky top-0 bg-card z-10">
+   310→   310→                <TableRow>
+   311→   311→                  <TableHead className="pl-6">Student</TableHead>
+   312→   312→                  <TableHead>Parent</TableHead>
+   313→   313→                  <TableHead>Phone</TableHead>
+   314→   314→                  <TableHead>Class</TableHead>
+   315→   315→                  <TableHead>Source</TableHead>
+   316→   316→                  <TableHead>Status</TableHead>
+   317→   317→                  <TableHead>Date</TableHead>
+   318→   318→                  <TableHead className="pr-6 text-right">Actions</TableHead>
+   319→   319→                </TableRow>
+   320→   320→              </TableHeader>
+   321→   321→              <TableBody>
+   322→   322→                {filtered.map((e) => {
+   323→   323→                  const next = ENQUIRY_FLOW[e.status]
+   324→   324→                  return (
+   325→   325→                    <TableRow key={e.id}>
+   326→   326→                      <TableCell className="pl-6">
+   327→   327→                        <div className="flex items-center gap-2.5 min-w-0">
+   328→   328→                          <div className="size-8 rounded-full bg-primary/10 text-primary grid place-items-center text-[11px] font-semibold shrink-0">{initials(e.studentName)}</div>
+   329→   329→                          <div className="min-w-0">
+   330→   330→                            <p className="font-medium text-sm truncate">{e.studentName}</p>
+   331→   331→                            {e.email && <p className="text-[11px] text-muted-foreground truncate">{e.email}</p>}
+   332→   332→                          </div>
+   333→   333→                        </div>
+   334→   334→                      </TableCell>
+   335→   335→                      <TableCell className="text-sm">{e.parentName}</TableCell>
+   336→   336→                      <TableCell className="text-sm tabular-nums">{e.phone}</TableCell>
+   337→   337→                      <TableCell><Badge variant="outline" className="text-[11px]">{e.classApplied}</Badge></TableCell>
+   338→   338→                      <TableCell className="text-sm text-muted-foreground">{e.source}</TableCell>
+   339→   339→                      <TableCell><StatusBadge status={e.status} /></TableCell>
+   340→   340→                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{fmtDate(e.createdAt)}</TableCell>
+   341→   341→                      <TableCell className="pr-6 text-right">
+   342→   342→                        <DropdownMenu>
+   343→   343→                          <DropdownMenuTrigger asChild>
+   344→   344→                            <Button variant="ghost" size="icon" className="size-8"><MoreHorizontal className="size-4" /></Button>
+   345→   345→                          </DropdownMenuTrigger>
+   346→   346→                          <DropdownMenuContent align="end" className="w-52">
+   347→   347→                            <DropdownMenuLabel>Advance status</DropdownMenuLabel>
+   348→   348→                            <DropdownMenuSeparator />
+   349→   349→                            {next && (
+   350→   350→                              <DropdownMenuItem onClick={() => updateMut.mutate({ id: e.id, status: next })} className="gap-2">
+   351→   351→                                <ChevronRight className="size-4 text-primary" /> Move to {next}
+   352→   352→                              </DropdownMenuItem>
+   353→   353→                            )}
+   354→   354→                            {(e.status !== 'Approved' && e.status !== 'Rejected') && (
+   355→   355→                              <>
+   356→   356→                                <DropdownMenuItem onClick={() => updateMut.mutate({ id: e.id, status: 'Approved' })} className="gap-2">
+   357→   357→                                  <CheckCircle2 className="size-4 text-emerald-600" /> Approve
+   358→   358→                                </DropdownMenuItem>
+   359→   359→                                <DropdownMenuSeparator />
+   360→   360→                                <DropdownMenuItem variant="destructive" onClick={() => updateMut.mutate({ id: e.id, status: 'Rejected' })} className="gap-2">
+   361→   361→                                  <Ban className="size-4" /> Reject
+   362→   362→                                </DropdownMenuItem>
+   363→   363→                              </>
+   364→   364→                            )}
+   365→   365→                            {e.message && (
+   366→   366→                              <>
+   367→   367→                                <DropdownMenuSeparator />
+   368→   368→                                <div className="px-2 py-1.5 text-[11px] text-muted-foreground max-w-[220px]">
+   369→   369→                                  <span className="font-medium text-foreground">Note:</span> {e.message}
+   370→   370→                                </div>
+   371→   371→                              </>
+   372→   372→                            )}
+   373→   373→                          </DropdownMenuContent>
+   374→   374→                        </DropdownMenu>
+   375→   375→                      </TableCell>
+   376→   376→                    </TableRow>
+   377→   377→                  )
+   378→   378→                })}
+   379→   379→              </TableBody>
+   380→   380→            </Table>
+   381→   381→          </div>
+   382→   382→        )}
+   383→   383→      </CardContent>
+   384→   384→    </Card>
+   385→   385→  )
+   386→   386→}
+   387→   387→
+   388→   388→// ============ Applications table ============
+   389→   389→function ApplicationsTable({ applications }: { applications: Application[] }) {
+   390→   390→  const qc = useQueryClient()
+   391→   391→  const [q, setQ] = useState('')
+   392→   392→
+   393→   393→  const updateMut = useMutation({
+   394→   394→    mutationFn: ({ id, status }: { id: string; status: string }) => api.admissions.updateApplication(id, { status }),
+   395→   395→    onSuccess: (_d, vars) => {
+   396→   396→      if (vars.status === 'Approved') {
+   397→   397→        toast.success('Student master record created', { description: 'The applicant is now an enrolled student.' })
+   398→   398→      } else {
+   399→   399→        toast.success(`Application marked ${vars.status}`)
+   400→   400→      }
+   401→   401→      qc.invalidateQueries({ queryKey: ['admissions', 'applications'] })
+   402→   402→    },
+   403→   403→    onError: () => toast.error('Failed to update application'),
+   404→   404→  })
+   405→   405→
+   406→   406→  const filtered = applications.filter((a) => {
+   407→   407→    if (!q) return true
+   408→   408→    const s = q.toLowerCase()
+   409→   409→    return a.studentName.toLowerCase().includes(s) || a.phone.includes(s) || (a.previousSchool || '').toLowerCase().includes(s)
+   410→   410→  })
+   411→   411→
+   412→   412→  return (
+   413→   413→    <Card>
+   414→   414→      <CardHeader className="pb-3">
+   415→   415→        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+   416→   416→          <div>
+   417→   417→            <CardTitle className="text-base">Applications</CardTitle>
+   418→   418→            <p className="text-xs text-muted-foreground mt-1">{filtered.length} application{filtered.length !== 1 ? 's' : ''}{q ? ` matching "${q}"` : ''}</p>
+   419→   419→          </div>
+   420→   420→          <div className="relative w-full sm:w-72">
+   421→   421→            <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+   422→   422→            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, phone, school…" className="pl-9" />
+   423→   423→          </div>
+   424→   424→        </div>
+   425→   425→      </CardHeader>
+   426→   426→      <CardContent className="px-0">
+   427→   427→        {filtered.length === 0 ? (
+   428→   428→          <div className="px-6 pb-2"><EmptyState icon={FileText} title="No applications found" description={q ? 'Try a different search term.' : 'Promote enquiries to applications to see them here.'} /></div>
+   429→   429→        ) : (
+   430→   430→          <div className="max-h-[60vh] overflow-y-auto scroll-thin">
+   431→   431→            <Table>
+   432→   432→              <TableHeader className="sticky top-0 bg-card z-10">
+   433→   433→                <TableRow>
+   434→   434→                  <TableHead className="pl-6">Student</TableHead>
+   435→   435→                  <TableHead>Parent</TableHead>
+   436→   436→                  <TableHead>Class</TableHead>
+   437→   437→                  <TableHead>Previous School</TableHead>
+   438→   438→                  <TableHead>Status</TableHead>
+   439→   439→                  <TableHead>Applied</TableHead>
+   440→   440→                  <TableHead className="pr-6 text-right">Actions</TableHead>
+   441→   441→                </TableRow>
+   442→   442→              </TableHeader>
+   443→   443→              <TableBody>
+   444→   444→                {filtered.map((a) => (
+   445→   445→                  <TableRow key={a.id}>
+   446→   446→                    <TableCell className="pl-6">
+   447→   447→                      <div className="flex items-center gap-2.5 min-w-0">
+   448→   448→                        <div className="size-8 rounded-full bg-primary/10 text-primary grid place-items-center text-[11px] font-semibold shrink-0">{initials(a.studentName)}</div>
+   449→   449→                        <div className="min-w-0">
+   450→   450→                          <p className="font-medium text-sm truncate">{a.studentName}</p>
+   451→   451→                          <p className="text-[11px] text-muted-foreground truncate tabular-nums">{a.phone}</p>
+   452→   452→                        </div>
+   453→   453→                      </div>
+   454→   454→                    </TableCell>
+   455→   455→                    <TableCell className="text-sm">{a.parentName}</TableCell>
+   456→   456→                    <TableCell><Badge variant="outline" className="text-[11px]">{a.classApplied}</Badge></TableCell>
+   457→   457→                    <TableCell className="text-sm text-muted-foreground max-w-[180px] truncate">{a.previousSchool || '—'}</TableCell>
+   458→   458→                    <TableCell><StatusBadge status={a.status} /></TableCell>
+   459→   459→                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{fmtDate(a.createdAt)}</TableCell>
+   460→   460→                    <TableCell className="pr-6 text-right">
+   461→   461→                      <DropdownMenu>
+   462→   462→                        <DropdownMenuTrigger asChild>
+   463→   463→                          <Button variant="ghost" size="icon" className="size-8"><MoreHorizontal className="size-4" /></Button>
+   464→   464→                        </DropdownMenuTrigger>
+   465→   465→                        <DropdownMenuContent align="end" className="w-56">
+   466→   466→                          <DropdownMenuLabel>Process application</DropdownMenuLabel>
+   467→   467→                          <DropdownMenuSeparator />
+   468→   468→                          {a.status === 'Submitted' && (
+   469→   469→                            <DropdownMenuItem onClick={() => updateMut.mutate({ id: a.id, status: 'Verified' })} className="gap-2">
+   470→   470→                              <ClipboardCheck className="size-4 text-primary" /> Verify Documents
+   471→   471→                            </DropdownMenuItem>
+   472→   472→                          )}
+   473→   473→                          {(a.status === 'Verified') && (
+   474→   474→                            <DropdownMenuItem onClick={() => updateMut.mutate({ id: a.id, status: 'TestScheduled' })} className="gap-2">
+   475→   475→                              <CalendarClock className="size-4 text-amber-600" /> Schedule Test
+   476→   476→                            </DropdownMenuItem>
+   477→   477→                          )}
+   478→   478→                          {a.status !== 'Approved' && a.status !== 'Rejected' && (
+   479→   479→                            <>
+   480→   480→                              <DropdownMenuItem onClick={() => updateMut.mutate({ id: a.id, status: 'Approved' })} className="gap-2">
+   481→   481→                                <GraduationCap className="size-4 text-emerald-600" /> Approve &amp; Create Student
+   482→   482→                              </DropdownMenuItem>
+   483→   483→                              <DropdownMenuSeparator />
+   484→   484→                              <DropdownMenuItem variant="destructive" onClick={() => updateMut.mutate({ id: a.id, status: 'Rejected' })} className="gap-2">
+   485→   485→                                <Ban className="size-4" /> Reject
+   486→   486→                              </DropdownMenuItem>
+   487→   487→                            </>
+   488→   488→                          )}
+   489→   489→                          {a.email && (
+   490→   490→                            <>
+   491→   491→                              <DropdownMenuSeparator />
+   492→   492→                              <div className="px-2 py-1.5 text-[11px] text-muted-foreground flex items-center gap-1.5">
+   493→   493→                                <Mail className="size-3" /> {a.email}
+   494→   494→                              </div>
+   495→   495→                            </>
+   496→   496→                          )}
+   497→   497→                        </DropdownMenuContent>
+   498→   498→                      </DropdownMenu>
+   499→   499→                    </TableCell>
+   500→   500→                  </TableRow>
+   501→   501→                ))}
+   502→   502→              </TableBody>
+   503→   503→            </Table>
+   504→   504→          </div>
+   505→   505→        )}
+   506→   506→      </CardContent>
+   507→   507→    </Card>
+   508→   508→  )
+   509→   509→}
+   510→   510→
+   511→   511→// ============ Main module ============
+   512→   512→export function AdmissionsModule() {
+   513→   513→  const [tab, setTab] = useState('pipeline')
+   514→   514→  const [newOpen, setNewOpen] = useState(false)
+   515→   515→
+   516→   516→  const enquiriesQ = useQuery({ queryKey: ['admissions', 'enquiries'], queryFn: api.admissions.enquiries })
+   517→   517→  const applicationsQ = useQuery({ queryKey: ['admissions', 'applications'], queryFn: api.admissions.applications })
+   518→   518→
+   519→   519→  const enquiries = enquiriesQ.data ?? []
+   520→   520→  const applications = applicationsQ.data ?? []
+   521→   521→  const loading = enquiriesQ.isLoading || applicationsQ.isLoading
+   522→   522→
+   523→   523→  const approvedThisYear = applications.filter((a) => a.status === 'Approved').length + enquiries.filter((e) => e.status === 'Approved').length
+   524→   524→  const pendingApplications = applications.filter((a) => a.status !== 'Approved' && a.status !== 'Rejected').length
+   525→   525→  const totalLeads = enquiries.length + applications.length
+   526→   526→  const conversionRate = totalLeads ? Math.round((approvedThisYear / totalLeads) * 100) : 0
+   527→   527→
+   528→   528→  return (
+   529→   529→    <div className="space-y-6">
+   530→   530→      <SectionHeader
+   531→   531→        title="Admissions"
+   532→   532→        description="Track enquiries, applications and convert leads to enrolled students."
+   533→   533→        action={<Button className="gap-1.5" onClick={() => setNewOpen(true)}><UserPlus className="size-4" /> New Enquiry</Button>}
+   534→   534→      />
+   535→   535→
+   536→   536→      {/* Stats */}
+   537→   537→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   538→   538→        <StatCard label="Total Enquiries" value={enquiries.length} sub="All-time leads" icon={ClipboardList} accent="primary" loading={enquiriesQ.isLoading} />
+   539→   539→        <StatCard label="Pending Applications" value={pendingApplications} sub="Awaiting decision" icon={FileText} accent="amber" loading={applicationsQ.isLoading} />
+   540→   540→        <StatCard label="Approved This Year" value={approvedThisYear} sub="Admitted students" icon={FileCheck2} accent="emerald" loading={loading} />
+   541→   541→        <StatCard label="Conversion Rate" value={`${conversionRate}%`} sub="Leads → Admissions" icon={Percent} accent="violet" loading={loading} />
+   542→   542→      </div>
+   543→   543→
+   544→   544→      <Tabs value={tab} onValueChange={setTab}>
+   545→   545→        <TabsList>
+   546→   546→          <TabsTrigger value="pipeline" className="gap-1.5"><ClipboardList className="size-4" /> Pipeline</TabsTrigger>
+   547→   547→          <TabsTrigger value="enquiries" className="gap-1.5"><MessageSquare className="size-4" /> Enquiries</TabsTrigger>
+   548→   548→          <TabsTrigger value="applications" className="gap-1.5"><FileText className="size-4" /> Applications</TabsTrigger>
+   549→   549→        </TabsList>
+   550→   550→
+   551→   551→        <TabsContent value="pipeline" className="mt-4">
+   552→   552→          {loading ? (
+   553→   553→            <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+   554→   554→              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-32 rounded-xl" />)}
+   555→   555→            </div>
+   556→   556→          ) : (
+   557→   557→            <PipelineOverview enquiries={enquiries} applications={applications} onNew={() => setNewOpen(true)} />
+   558→   558→          )}
+   559→   559→        </TabsContent>
+   560→   560→
+   561→   561→        <TabsContent value="enquiries" className="mt-4">
+   562→   562→          {enquiriesQ.isLoading ? (
+   563→   563→            <Card><CardContent><Skeleton className="h-72 w-full" /></CardContent></Card>
+   564→   564→          ) : (
+   565→   565→            <EnquiriesTable enquiries={enquiries} />
+   566→   566→          )}
+   567→   567→        </TabsContent>
+   568→   568→
+   569→   569→        <TabsContent value="applications" className="mt-4">
+   570→   570→          {applicationsQ.isLoading ? (
+   571→   571→            <Card><CardContent><Skeleton className="h-72 w-full" /></CardContent></Card>
+   572→   572→          ) : (
+   573→   573→            <ApplicationsTable applications={applications} />
+   574→   574→          )}
+   575→   575→        </TabsContent>
+   576→   576→      </Tabs>
+   577→   577→
+   578→   578→      <NewEnquiryDialog open={newOpen} onOpenChange={setNewOpen} />
+   579→   579→    </div>
+   580→   580→  )
+   581→   581→}
+   582→   582→

@@ -1,0 +1,409 @@
+// Enterprise School ERP Schema (Vidyalaya-style)
+// Master entities: Student, Employee, Class, Section, Subject, Vehicle, Book, Asset
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============ ACADEMIC STRUCTURE ============
+
+model AcademicYear {
+  id        String   @id @default(cuid())
+  name      String   @unique // e.g. "2026-27"
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(false)
+  classes   Class[]
+  exams     Exam[]
+  createdAt DateTime @default(now())
+}
+
+model Class {
+  id             String          @id @default(cuid())
+  name           String // e.g. "Class 1", "Grade 10"
+  academicYearId String
+  academicYear   AcademicYear    @relation(fields: [academicYearId], references: [id])
+  sections       Section[]
+  subjects       Subject[]
+  students       Student[]
+  timetableSlots TimetableSlot[]
+  feeStructures  FeeStructure[]
+  exams          ExamClass[]
+  createdAt      DateTime        @default(now())
+}
+
+model Section {
+  id        String          @id @default(cuid())
+  name      String // A, B, C
+  classId   String
+  class     Class           @relation(fields: [classId], references: [id])
+  capacity  Int             @default(40)
+  teacherId String? // class teacher
+  students  Student[]
+  timetable TimetableSlot[]
+  createdAt DateTime        @default(now())
+}
+
+model Subject {
+  id        String   @id @default(cuid())
+  name      String
+  code      String
+  classId   String
+  class     Class    @relation(fields: [classId], references: [id])
+  teacherId String?
+  createdAt DateTime @default(now())
+}
+
+// ============ ADMISSIONS ============
+
+model AdmissionEnquiry {
+  id           String   @id @default(cuid())
+  studentName  String
+  parentName   String
+  phone        String
+  email        String?
+  classApplied String
+  source       String // Website, Walk-in, Referral
+  status       String   @default("Enquiry") // Enquiry, Application, Test, Interview, Approved, Rejected
+  message      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Application {
+  id             String    @id @default(cuid())
+  enquiryId      String?
+  studentName    String
+  parentName     String
+  phone          String
+  email          String?
+  dob            DateTime?
+  gender         String?
+  address        String?
+  classApplied   String
+  previousSchool String?
+  status         String    @default("Submitted") // Submitted, Verified, TestScheduled, Interview, Approved, Rejected
+  documents      String? // JSON string of document list
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// ============ STUDENT MASTER ============
+
+model Student {
+  id               String         @id @default(cuid())
+  admissionNo      String         @unique
+  firstName        String
+  lastName         String
+  dob              DateTime
+  gender           String
+  bloodGroup       String?
+  religion         String?
+  nationality      String         @default("Indian")
+  address          String?
+  phone            String?
+  email            String?
+  // Parent details
+  fatherName       String?
+  motherName       String?
+  guardianName     String?
+  parentPhone      String?
+  parentEmail      String?
+  parentOccupation String?
+  // Academic
+  classId          String?
+  class            Class?         @relation(fields: [classId], references: [id])
+  sectionId        String?
+  section          Section?       @relation(fields: [sectionId], references: [id])
+  rollNo           Int?
+  admissionDate    DateTime       @default(now())
+  previousSchool   String?
+  // Medical
+  medicalInfo      String?
+  // Transport
+  transportRouteId String?
+  // Hostel
+  hostelRoomId     String?
+  // Status
+  status           String         @default("Active") // Active, Inactive, Alumni, Transfer
+  photo            String?
+  // Relations
+  attendance       Attendance[]
+  feeInvoices      FeeInvoice[]
+  examMarks        ExamMark[]
+  libraryIssues    LibraryIssue[]
+  certificates     Certificate[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+// ============ ATTENDANCE ============
+
+model Attendance {
+  id         String   @id @default(cuid())
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id])
+  date       DateTime
+  status     String // Present, Absent, Leave, HalfDay, Late
+  method     String   @default("Manual") // Manual, UHF, RFID
+  markedById String?
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@unique([studentId, date])
+}
+
+// ============ FEES ============
+
+model FeeStructure {
+  id          String       @id @default(cuid())
+  name        String // e.g. "Tuition Fee", "Transport Fee", "Library Fee"
+  classId     String
+  class       Class        @relation(fields: [classId], references: [id])
+  amount      Float
+  frequency   String       @default("Annual") // Annual, Term, Monthly, OneTime
+  dueDate     DateTime?
+  createdAt   DateTime     @default(now())
+  feeInvoices FeeInvoice[]
+}
+
+model FeeInvoice {
+  id             String       @id @default(cuid())
+  invoiceNo      String       @unique
+  studentId      String
+  student        Student      @relation(fields: [studentId], references: [id])
+  feeStructureId String
+  feeStructure   FeeStructure @relation(fields: [feeStructureId], references: [id])
+  amount         Float
+  paidAmount     Float        @default(0)
+  discount       Float        @default(0)
+  fine           Float        @default(0)
+  dueDate        DateTime
+  status         String       @default("Unpaid") // Unpaid, Partial, Paid, Overdue
+  paymentMethod  String? // Cash, Card, Online, UPI
+  paymentDate    DateTime?
+  createdAt      DateTime     @default(now())
+}
+
+// ============ EXAMS ============
+
+model Exam {
+  id             String       @id @default(cuid())
+  name           String // e.g. "Mid Term 2026"
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  examType       String // Unit Test, Mid Term, Final, Online
+  startDate      DateTime
+  endDate        DateTime
+  status         String       @default("Scheduled")
+  classes        ExamClass[]
+  marks          ExamMark[]
+  createdAt      DateTime     @default(now())
+}
+
+model ExamClass {
+  id      String @id @default(cuid())
+  examId  String
+  exam    Exam   @relation(fields: [examId], references: [id])
+  classId String
+  class   Class  @relation(fields: [classId], references: [id])
+
+  @@unique([examId, classId])
+}
+
+model ExamMark {
+  id        String   @id @default(cuid())
+  examId    String
+  exam      Exam     @relation(fields: [examId], references: [id])
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  subject   String
+  maxMarks  Float
+  obtained  Float?
+  grade     String?
+  remarks   String?
+  createdAt DateTime @default(now())
+
+  @@unique([examId, studentId, subject])
+}
+
+// ============ TIMETABLE ============
+
+model TimetableSlot {
+  id          String   @id @default(cuid())
+  classId     String
+  class       Class    @relation(fields: [classId], references: [id])
+  sectionId   String?
+  section     Section? @relation(fields: [sectionId], references: [id])
+  day         String // Monday...Sunday
+  period      Int // 1..8
+  subjectName String
+  teacherName String
+  room        String?
+  startTime   String
+  endTime     String
+  createdAt   DateTime @default(now())
+
+  @@unique([classId, sectionId, day, period])
+}
+
+// ============ TRANSPORT ============
+
+model Vehicle {
+  id          String    @id @default(cuid())
+  vehicleNo   String    @unique
+  type        String // Bus, Van
+  capacity    Int
+  driverName  String
+  driverPhone String
+  routeName   String
+  gpsDeviceId String?
+  // live tracking (updated by tracking service)
+  currentLat  Float?
+  currentLng  Float?
+  speed       Float?
+  heading     Float?
+  lastUpdate  DateTime?
+  status      String    @default("Idle") // Idle, Moving, Stopped, Maintenance
+  createdAt   DateTime  @default(now())
+}
+
+model TransportStop {
+  id         String   @id @default(cuid())
+  name       String
+  routeName  String
+  lat        Float
+  lng        Float
+  pickupTime String
+  dropTime   String
+  fare       Float    @default(0)
+  createdAt  DateTime @default(now())
+}
+
+// ============ LIBRARY ============
+
+model Book {
+  id            String         @id @default(cuid())
+  accessionNo   String         @unique
+  title         String
+  author        String
+  isbn          String?
+  category      String
+  publisher     String?
+  edition       String?
+  price         Float          @default(0)
+  totalCopies   Int            @default(1)
+  available     Int            @default(1)
+  rack          String?
+  createdAt     DateTime       @default(now())
+  libraryIssues LibraryIssue[]
+}
+
+model LibraryIssue {
+  id         String    @id @default(cuid())
+  bookId     String
+  book       Book      @relation(fields: [bookId], references: [id])
+  studentId  String
+  student    Student   @relation(fields: [studentId], references: [id])
+  issueDate  DateTime  @default(now())
+  dueDate    DateTime
+  returnDate DateTime?
+  fine       Float     @default(0)
+  status     String    @default("Issued") // Issued, Returned, Lost
+  createdAt  DateTime  @default(now())
+}
+
+// ============ HR ============
+
+model Employee {
+  id          String         @id @default(cuid())
+  empCode     String         @unique
+  firstName   String
+  lastName    String
+  designation String
+  department  String
+  gender      String
+  dob         DateTime?
+  phone       String
+  email       String?
+  address     String?
+  joiningDate DateTime       @default(now())
+  salary      Float          @default(0)
+  status      String         @default("Active") // Active, OnLeave, Resigned
+  leaves      LeaveRequest[]
+  createdAt   DateTime       @default(now())
+}
+
+model LeaveRequest {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  leaveType  String // Casual, Sick, Earned, Maternity
+  startDate  DateTime
+  endDate    DateTime
+  reason     String
+  status     String   @default("Pending") // Pending, HODApproved, PrincipalApproved, Rejected
+  appliedAt  DateTime @default(now())
+  createdAt  DateTime @default(now())
+}
+
+model Payroll {
+  id          String    @id @default(cuid())
+  employeeId  String
+  month       String // "2026-06"
+  basicSalary Float
+  allowances  Float     @default(0)
+  deductions  Float     @default(0)
+  netPay      Float
+  status      String    @default("Pending") // Pending, Processed, Paid
+  paidAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([employeeId, month])
+}
+
+// ============ CERTIFICATES ============
+
+model Certificate {
+  id            String   @id @default(cuid())
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id])
+  type          String // Transfer, Bonafide, Conduct, Study
+  certificateNo String   @unique
+  issuedDate    DateTime @default(now())
+  issuedBy      String?
+  createdAt     DateTime @default(now())
+}
+
+// ============ COMMUNICATION ============
+
+model Notification {
+  id        String   @id @default(cuid())
+  channel   String // SMS, Email, WhatsApp, Push
+  recipient String
+  subject   String?
+  message   String
+  category  String // Attendance, Fees, Exam, Transport, General
+  status    String   @default("Sent") // Queued, Sent, Failed
+  createdAt DateTime @default(now())
+}
+
+// ============ ASSETS / INVENTORY ============
+
+model Asset {
+  id            String   @id @default(cuid())
+  assetCode     String   @unique
+  name          String
+  category      String // Projector, Computer, Furniture, Bus, Lab Equipment
+  location      String?
+  purchaseDate  DateTime @default(now())
+  purchaseValue Float
+  condition     String   @default("Good") // Good, Damaged, Under Repair
+  assignedTo    String?
+  createdAt     DateTime @default(now())
+}
