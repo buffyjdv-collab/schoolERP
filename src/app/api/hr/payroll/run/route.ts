@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { requirePerm } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
+  const guard = await requirePerm('hr', 'run')
+  if (!guard.ok) return guard.res
   const { month } = await req.json()
   const employees = await db.employee.findMany({ where: { status: 'Active' } })
   let created = 0

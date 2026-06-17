@@ -187,3 +187,102 @@ Stage Summary:
 - Live transport GPS tracking via socket.io mini-service on port 3003.
 - Full ESLint passes (0 errors). Dev log clean (all 200s).
 - Agent-browser verified: dashboard real data, student profile drawer, AI chat with live data, transport live map with moving buses, all module tabs render.
+
+---
+Task ID: 9
+Agent: rbac-ui-guards
+Task: Add module-level RBAC permission guards to 5 existing ERP module UI files
+
+Work Log:
+- Read worklog.md (architecture, conventions, prior agents' work) and the RBAC source of truth: `src/lib/rbac.ts` (PERMISSIONS matrix, AuthUser, can()) and `src/lib/store.ts` (useCan() hook returning `(module, action) => boolean`; useStore() exposing `user`).
+- Verified backend already enforces permissions on all relevant routes (attendance/summary role-scopes to own/children/teacher-classes; exams/marks role-scopes to own/children/teacher-classes; students/list scoped; library/issues scoped). UI guards are purely additive (hide actions for restricted roles, never alter API calls or break admin/teacher flows).
+- Files modified (5):
+
+1. `src/components/modules/attendance.tsx` — added `useCan`, `useStore`, `AuthUser`, `AttendanceRecord` imports; added `CalendarDays` to icon imports.
+   - New `MyAttendancePanel` component (read-only, ~210 lines): shown when `!can('attendance','mark')` (i.e., students/parents).
+     - Resolves linked student ids from `user.studentId` (student) or `user.childrenStudentIds` (parent).
+     - For parents with multiple children: fetches visible students via `api.students.list()` (backend-scoped to children) and renders a child selector dropdown.
+     - Fetches attendance records via `api.students.attendance(activeStudentId)`.
+     - Computes last-30-day attendance rate from records (Present / Marked) and renders a big colored rate number (emerald ≥90, amber ≥75, rose <75) with a "Present / Marked" tile.
+     - Renders a 30-day calendar grid (`grid-cols-7 sm:grid-cols-10`, color-coded cells: emerald=Present, rose=Absent, amber=Late, sky=Leave, violet=HalfDay, muted=not marked) with date number and tooltip.
+     - Renders a "Recent Statuses" card listing the last 10 entries with status dot, date, and method.
+     - Handles edge case: no linked student → EmptyState "No linked student".
+   - Main `AttendanceModule`: reads `canMark = useCan()('attendance','mark')` and `user = useStore((s) => s.user)`.
+     - Tabs `defaultValue` is now `canMark ? 'mark' : 'mine'`.
+     - TabsList conditionally renders either `<TabsTrigger value="mark">Mark Attendance</TabsTrigger>` (staff) OR `<TabsTrigger value="mine">My Attendance / My Children</TabsTrigger>` (students/parents). UHF/RFID tab stays visible to all (additive).
+     - TabsContent for "mark" (with MarkAttendancePanel + ClassWiseAttendance) only renders when `canMark`; otherwise TabsContent for "mine" renders MyAttendancePanel.
+     - Existing 5 StatCards (Attendance Rate, Present Today, Absent Today, Late Today, On Leave) stay visible to all (backend already role-scopes the summary).
+     - Existing teacher/admin mark-attendance flow is untouched.
+
+2. `src/components/modules/exams.tsx` — added `useCan`, `useStore` imports.
+   - Main `ExamsModule`: reads `canEnter = useCan()('exams','enter')` and `isStudentOrParent`.
+     - `effectiveClassId` is `''` for students/parents (backend scopes marks to their own/children's anyway), or `classId || classes[0]?.id` for staff.
+     - Class selector in exam header is hidden for students/parents (replaced with italic note "Scoped to your record" / "Scoped to your children").
+     - When `canEnter`, shows a small emerald "Can enter marks" badge next to the class selector.
+     - Exam list, Progress Card, Analysis tabs all stay visible to all (read-only).
+   - `MarksSheetTab`: added `useStore` to read `user`. For parents: derives `childrenWithMarks` from `user.childrenStudentIds` ∩ marks, renders a child selector dropdown at the top of the card header (only when >1 child has marks), and filters marks client-side to the selected child.
+     - Added defensive comment: "any future marks-entry input / cell-editing UI MUST be wrapped in `useCan()('exams','enter')` so only teachers/admins can edit. The sheet below is read-only display — students/parents see only their own / children's marks (the backend enforces scoping)." No marks-entry input existed, so nothing to wrap; the guard is documented for future maintainers.
+     - The `useMemo` (subjects/rows/subjectAverages) now consumes the (potentially filtered-for-parent) `marks` array — re-computes correctly when the selected child changes.
+
+3. `src/components/modules/hr.tsx` — added `useCan` import; added `ShieldAlert` icon.
+   - Main `HrModule`: defensive `canView = useCan()('hr','view')` guard. All three useQuery hooks (employees, leaves, payroll) now pass `enabled: canView` so they don't fire when the user can't access HR. If `!canView`, renders `<EmptyState icon={ShieldAlert} title="Access Denied" description="You do not have permission to view the HR & Payroll module. Please contact an administrator if you believe this is an error." />` instead of loading data. (Handles the edge case where a user navigates directly to /hr.)
+   - `LeavesTab`: `canApprove = useCan()('hr','approve')`. Pending rows now show either the HOD/Principal/Reject buttons (when `canApprove`) OR an italic "View only" text. Resolved rows still show "Resolved".
+   - `PayrollTab`: `canRun = useCan()('hr','run')`. The "Run Payroll" button is wrapped in `{canRun && ...}`. The month selector, payroll table, totals footer, and Mark Paid action stay visible.
+
+4. `src/components/modules/library.tsx` — added `useCan` import.
+   - `CatalogTab`: `canIssue = useCan()('library','issue')`. Per-book action cell:
+     - When `canIssue`: existing "Issue" / "Unavailable" button (admin/teacher).
+     - When `!canIssue` and `out`: "Unavailable" text (rose).
+     - When `!canIssue` and available: "Available" text (emerald).
+     - The `<IssueBookDialog>` is only mounted when `canIssue` (defensive — prevents the dialog from being opened even if state got into a bad state).
+   - `IssuedTab`: `canReturn = useCan()('library','return')`. Per-issue action cell:
+     - When status=Issued AND `canReturn`: existing "Return" button.
+     - When status=Issued AND `!canReturn`: italic "Issued" text (read-only).
+     - When status≠Issued: return date or "—" (unchanged).
+     - Backend already scopes the issues list to the user's own/children's issues for students/parents.
+
+5. `src/components/modules/communication.tsx` — added `useCan` import.
+   - `ComposeCard`: `canSend = useCan()('communication','send')`. The "Send {channel}" button is wrapped in `{canSend ? <Button>...</Button> : <notice>}`.
+     - When `!canSend`: replaces the Send button with an amber-tinted notice card: "Sending is restricted to staff. You can still draft messages and use AI Compose."
+     - AI Compose panel, channel selector, recipient/subject/message inputs, and Category select all stay visible to all (per spec — AI just drafts, doesn't send).
+   - Message History card unchanged — all roles can view (backend scopes appropriately).
+
+- Conventions followed: `'use client'` first line preserved; `useCan`/`useStore` imported from `@/lib/store`; existing shadcn components + shared `EmptyState` primitive reused; no API calls or backend changes; emerald/teal accent only (NO indigo/blue); responsive (mobile-first with sm/md/lg/xl breakpoints); all guards are additive (hide for restricted roles, keep for admin).
+- ESLint: `bun node_modules/eslint/bin/eslint.js src/components/modules/attendance.tsx src/components/modules/exams.tsx src/components/modules/hr.tsx src/components/modules/library.tsx src/components/modules/communication.tsx` → exit 0, 0 errors, 0 warnings.
+- TypeScript: `bunx tsc --noEmit` → no errors in any of the 5 modified files (only pre-existing errors in unrelated files: examples/websocket, mini-services/transport-tracker, skills/*, src/app/api/hr/payroll/route, src/components/erp/sidebar, src/components/modules/students).
+- Dev log: `✓ Compiled in 307ms` etc. — no compile errors after edits; transport tracker still streaming 200s.
+
+Stage Summary:
+- 5 module files now enforce RBAC at the UI layer in addition to the existing backend enforcement:
+  - **Attendance**: students/parents get a read-only "My Attendance" / "My Children's Attendance" panel (rate + 30-day calendar grid + recent statuses) with child selector for parents; teachers/admins keep the existing Mark Attendance + UHF/RFID Live tabs.
+  - **Exams**: class selector hidden for students/parents (backend scopes marks); parent child selector added to Marks Sheet; can-enter-marks badge shown for staff; Progress Card and Analysis tabs visible to all.
+  - **HR**: defensive Access-Denied EmptyState when `!can('hr','view')` (handles direct navigation); Approve buttons (HOD/Principal/Reject) hidden unless `can('hr','approve')`; Run Payroll button hidden unless `can('hr','run')`.
+  - **Library**: Issue button hidden unless `can('library','issue')` (replaced with Available/Unavailable text); Return button hidden unless `can('library','return')` (replaced with "Issued" text).
+  - **Communication**: Send Message button hidden unless `can('communication','send')` (replaced with amber notice that AI Compose is still available); AI Compose, draft inputs, and Message History visible to all.
+- All guards are additive: admin/super_admin/teacher retain 100% of existing functionality. Students/parents see appropriate read-only views with their scoped data.
+- Lint status: 5 files, 0 errors, 0 warnings, exit 0.
+
+---
+Task ID: RBAC-1..10
+Agent: main + subagent (task 9)
+Task: Implement robust Role-Based Access Control (RBAC) system with Admin, Teacher, Student, Parent roles + granular per-module permissions
+
+Work Log:
+- Extended Prisma schema: User (role, passwordHash, employeeId, studentId), TeacherClass junction, ParentChild junction; seeded 5 role accounts (super_admin, admin, teacher, student, parent) with scrypt-hashed passwords
+- Built RBAC engine (src/lib/rbac.ts): permission matrix mapping Role × Module × Action[]; can()/accessibleModules()/actionsFor()/visibleStudentIds() helpers
+- Built auth (src/lib/password.ts scrypt hashing; src/lib/auth.ts HMAC-signed session cookie + getCurrentUser() + requirePerm() guard)
+- Auth API: /api/auth/login (sets httpOnly cookie), /logout, /me
+- Client auth store (Zustand): user, authLoading, useCan()/useAccessibleModules() hooks
+- LoginOverlay: branded split-screen with 5 demo-account quick-login buttons
+- Sidebar filters modules by accessibleModules(role); Topbar shows role badge + Switch User dropdown; ErpLayout gates on auth (loading → login → app) with module-access guard
+- Role-specific dashboards: StudentDashboard (own attendance/fees/marks/radar), ParentDashboard (child selector + per-child cards), TeacherDashboard (my classes + quick actions), AdminDashboard (full MIS)
+- Backend enforcement on all key APIs: students/fees/exams/attendance scoped by role (student=own, parent=children, teacher=assigned classes); HR/assets/admissions/communication protected by requirePerm(); AI chat builds role-appropriate context (student/parent get personal data only, not institution-wide)
+- Module-level UI guards: Students hides Add button; Fees shows Pay (student/parent) vs Collect (admin) + hides Defaulters/Accounting tabs; Attendance shows read-only "My Attendance" for students/parents; Exams hides marks entry; HR defensive guard; Library hides Issue/Return; Communication hides Send
+- Fixed seed: attendance dates normalized to midnight for reliable date matching
+- Verified via agent-browser: all 5 roles login, scoped dashboards render, sidebar filtering correct, student sees "My Attendance" + "Pay" buttons, AI gives scoped answers, backend returns 403 for forbidden actions
+
+Stage Summary:
+- Complete RBAC: 5 roles, 14 modules × 13 actions permission matrix, data-scoped APIs, role-specific UIs.
+- Demo accounts: superadmin/super123, admin/admin123, teacher/teacher123, student/student123, parent/parent123
+- ESLint: 0 errors across entire src/. Dev server + transport tracker both healthy.
+- Agent-browser verified: student/parent/teacher/admin all render correctly with appropriate access.

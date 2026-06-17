@@ -34,6 +34,7 @@ model Class {
   timetableSlots TimetableSlot[]
   feeStructures  FeeStructure[]
   exams          ExamClass[]
+  teacherClasses TeacherClass[]
   createdAt      DateTime        @default(now())
 }
 
@@ -138,6 +139,7 @@ model Student {
   examMarks        ExamMark[]
   libraryIssues    LibraryIssue[]
   certificates     Certificate[]
+  parentLinks      ParentChild[]
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 }
@@ -406,4 +408,42 @@ model Asset {
   condition     String   @default("Good") // Good, Damaged, Under Repair
   assignedTo    String?
   createdAt     DateTime @default(now())
+}
+
+// ============ RBAC / AUTH ============
+
+model User {
+  id             String         @id @default(cuid())
+  email          String         @unique
+  name           String
+  passwordHash   String
+  role           String // super_admin | admin | teacher | student | parent
+  employeeId     String? // link to Employee (for admin/teacher)
+  studentId      String? // link to Student (for student role)
+  active         Boolean        @default(true)
+  lastLogin      DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  teacherClasses TeacherClass[] // classes a teacher can access
+  parentLinks    ParentChild[] // children a parent can access
+}
+
+model TeacherClass {
+  id      String @id @default(cuid())
+  userId  String
+  classId String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, classId])
+}
+
+model ParentChild {
+  id        String  @id @default(cuid())
+  userId    String
+  studentId String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, studentId])
 }

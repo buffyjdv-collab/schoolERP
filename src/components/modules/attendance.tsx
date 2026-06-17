@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import type { ClassInfo, Student } from '@/lib/types'
+import type { ClassInfo, Student, AttendanceRecord } from '@/lib/types'
+import { useCan, useStore } from '@/lib/store'
+import type { AuthUser } from '@/lib/rbac'
 import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
@@ -19,7 +21,7 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@/components/ui/select'
 import {
-  CalendarCheck, UserCheck, UserX, Clock3, Plane, Radio, Cpu,
+  CalendarCheck, CalendarDays, UserCheck, UserX, Clock3, Plane, Radio, Cpu,
   DoorOpen, LogIn, Save, CheckCheck, RefreshCw, GraduationCap, ScanLine,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -628,9 +630,234 @@ function UhfRfidLive() {
 }
 
 // ============================================================
+// My Attendance — read-only panel for students/parents
+// (shown when !can('attendance','mark'); backend scopes records to
+// the student's own/children's ids).
+// ============================================================
+function MyAttendancePanel({ user }: { user: AuthUser }) {
+  const isParent = user.role === 'parent'
+  const isStudent = user.role === 'student'
+
+  // Linked student ids — student has one, parent has 0..n.
+  const studentIds = isStudent && user.studentId
+    ? [user.studentId]
+    : isParent
+      ? user.childrenStudentIds
+      : []
+
+  const [activeIdx, setActiveIdx] = useState(0)
+  const effectiveIdx = Math.min(activeIdx, Math.max(0, studentIds.length - 1))
+  const activeStudentId = studentIds[effectiveIdx] ?? ''
+
+  // For parents with multiple children, fetch visible students (backend
+  // already scopes /api/students to own/children) so we can render a child
+  // selector dropdown with names.
+  const studentsQ = useQuery({
+    queryKey: ['students', 'list', 'my-attendance'],
+    queryFn: () => api.students.list(),
+    enabled: isParent,
+  })
+  const childOptions = (studentsQ.data ?? []).filter((s) => studentIds.includes(s.id))
+  const activeStudent = childOptions.find((s) => s.id === activeStudentId) ?? null
+
+  // Attendance records for the active student.
+  const attQ = useQuery({
+    queryKey: ['students', activeStudentId, 'attendance'],
+    queryFn: () => api.students.attendance(activeStudentId),
+    enabled: !!activeStudentId,
+  })
+  const records: AttendanceRecord[] = attQ.data ?? []
+
+  // Build a 30-day grid ending today.
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const grid: { date: Date; iso: string; status: string | null }[] = []
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i)
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const rec = records.find((r) => r.date.slice(0, 10) === iso)
+    grid.push({ date: d, iso, status: rec?.status ?? null })
+  }
+
+  const presentCount = grid.filter((g) => g.status === 'Present').length
+  const markedCount = grid.filter((g) => g.status !== null).length
+  const rate = markedCount ? Math.round((presentCount / markedCount) * 100) : 0
+
+  const recent = [...records].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10)
+
+  if (!activeStudentId) {
+    return (
+      <Card>
+        <CardContent className="py-2">
+          <EmptyState
+            icon={UserCheck}
+            title="No linked student"
+            description="Your account is not linked to a student record. Please contact the school office."
+          />
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const cellClass = (status: string | null): string => {
+    if (status === 'Present') return 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+    if (status === 'Absent') return 'bg-rose-500/20 text-rose-700 dark:text-rose-400'
+    if (status === 'Late') return 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
+    if (status === 'Leave') return 'bg-sky-500/20 text-sky-700 dark:text-sky-400'
+    if (status === 'HalfDay') return 'bg-violet-500/20 text-violet-700 dark:text-violet-400'
+    return 'bg-muted/60 text-muted-foreground/60'
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+      <div className="lg:col-span-2 space-y-4">
+        {/* Rate card + (optional) child selector */}
+        <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <CalendarCheck className="size-4 text-primary" />
+                  {isParent ? "My Children's Attendance" : 'My Attendance'}
+                </CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  Last 30 days
+                  {activeStudent ? ` · ${activeStudent.fullName}` : ''}
+                  {activeStudent?.className ? ` · ${activeStudent.className}` : ''}
+                </CardDescription>
+              </div>
+              {isParent && childOptions.length > 1 && (
+                <Select
+                  value={activeStudentId}
+                  onValueChange={(v) => {
+                    const idx = studentIds.indexOf(v)
+                    if (idx >= 0) setActiveIdx(idx)
+                  }}
+                >
+                  <SelectTrigger size="sm" className="w-48">
+                    <SelectValue placeholder="Select child" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {childOptions.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {attQ.isLoading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : (
+              <div className="flex items-end gap-4 flex-wrap">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Attendance Rate</p>
+                  <p className={cn(
+                    'text-5xl font-bold tabular-nums leading-none',
+                    rate >= 90 ? 'text-emerald-600' : rate >= 75 ? 'text-amber-600' : 'text-rose-600',
+                  )}>
+                    {rate}<span className="text-2xl">%</span>
+                  </p>
+                </div>
+                <div className="ml-auto text-right">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Present / Marked</p>
+                  <p className="text-lg font-semibold tabular-nums">{presentCount} / {markedCount}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">of last 30 days</p>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 30-day calendar grid */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <CalendarDays className="size-4 text-primary" /> Last 30 Days
+            </CardTitle>
+            <CardDescription className="text-xs">
+              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-emerald-500" /> Present</span>
+              <span className="mx-1.5">·</span>
+              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-rose-500" /> Absent</span>
+              <span className="mx-1.5">·</span>
+              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-amber-500" /> Late</span>
+              <span className="mx-1.5">·</span>
+              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-sky-500" /> Leave</span>
+              <span className="mx-1.5">·</span>
+              <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-violet-500" /> Half Day</span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {attQ.isLoading ? (
+              <Skeleton className="h-32 w-full" />
+            ) : (
+              <div className="grid grid-cols-7 sm:grid-cols-10 gap-1.5">
+                {grid.map((g) => (
+                  <div
+                    key={g.iso}
+                    title={`${g.date.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}: ${g.status ?? 'Not marked'}`}
+                    className={cn(
+                      'aspect-square rounded-md grid place-items-center text-[10px] font-semibold tabular-nums transition-transform hover:scale-105',
+                      cellClass(g.status),
+                    )}
+                  >
+                    {g.date.getDate()}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent statuses list */}
+      <Card className="lg:col-span-1 h-fit">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <Clock3 className="size-4 text-primary" /> Recent Statuses
+          </CardTitle>
+          <CardDescription className="text-xs">Last 10 attendance entries.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {attQ.isLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          ) : recent.length === 0 ? (
+            <EmptyState icon={Clock3} title="No records yet" description="Attendance entries will appear here once marked." />
+          ) : (
+            <div className="max-h-[55vh] overflow-y-auto scroll-thin space-y-1.5 pr-1">
+              {recent.map((r) => {
+                const meta = STATUS_ORDER.includes(r.status as AttStatus) ? STATUS_META[r.status as AttStatus] : null
+                return (
+                  <div key={r.id} className="flex items-center gap-2 rounded-lg border px-2.5 py-2">
+                    <span className={cn('size-2 rounded-full shrink-0', meta?.dot ?? 'bg-muted-foreground')} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium">{r.status}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {new Date(r.date).toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}
+                      </p>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{r.method}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// ============================================================
 // Main module
 // ============================================================
 export function AttendanceModule() {
+  const can = useCan()
+  const user = useStore((s) => s.user)
+  const canMark = can('attendance', 'mark')
+
   const summaryQ = useQuery({ queryKey: ['attendance', 'summary'], queryFn: () => api.attendance.summary() })
   const classesQ = useQuery({ queryKey: ['academics', 'classes'], queryFn: api.academics.classes })
 
@@ -688,30 +915,40 @@ export function AttendanceModule() {
         />
       </div>
 
-      <Tabs defaultValue="mark">
+      <Tabs defaultValue={canMark ? 'mark' : 'mine'}>
         <TabsList>
-          <TabsTrigger value="mark" className="gap-1.5"><CalendarCheck className="size-4" /> Mark Attendance</TabsTrigger>
+          {canMark ? (
+            <TabsTrigger value="mark" className="gap-1.5"><CalendarCheck className="size-4" /> Mark Attendance</TabsTrigger>
+          ) : (
+            <TabsTrigger value="mine" className="gap-1.5"><UserCheck className="size-4" /> {user?.role === 'parent' ? "My Children" : 'My Attendance'}</TabsTrigger>
+          )}
           <TabsTrigger value="uhf" className="gap-1.5"><Radio className="size-4" /> UHF / RFID Live</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="mark" className="mt-4">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-            <div className="lg:col-span-2">
-              {classesQ.isLoading ? (
-                <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
-              ) : classesQ.isError ? (
-                <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load classes" description="Please retry." /></CardContent></Card>
-              ) : (classesQ.data ?? []).length === 0 ? (
-                <Card><CardContent className="py-2"><EmptyState icon={GraduationCap} title="No classes found" description="Set up classes in Academics to mark attendance." /></CardContent></Card>
-              ) : (
-                <MarkAttendancePanel classes={classesQ.data!} />
-              )}
+        {canMark ? (
+          <TabsContent value="mark" className="mt-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+              <div className="lg:col-span-2">
+                {classesQ.isLoading ? (
+                  <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+                ) : classesQ.isError ? (
+                  <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load classes" description="Please retry." /></CardContent></Card>
+                ) : (classesQ.data ?? []).length === 0 ? (
+                  <Card><CardContent className="py-2"><EmptyState icon={GraduationCap} title="No classes found" description="Set up classes in Academics to mark attendance." /></CardContent></Card>
+                ) : (
+                  <MarkAttendancePanel classes={classesQ.data!} />
+                )}
+              </div>
+              <div className="lg:col-span-1">
+                <ClassWiseAttendance byClass={byClass} loading={summaryQ.isLoading} />
+              </div>
             </div>
-            <div className="lg:col-span-1">
-              <ClassWiseAttendance byClass={byClass} loading={summaryQ.isLoading} />
-            </div>
-          </div>
-        </TabsContent>
+          </TabsContent>
+        ) : (
+          <TabsContent value="mine" className="mt-4">
+            {user ? <MyAttendancePanel user={user} /> : null}
+          </TabsContent>
+        )}
 
         <TabsContent value="uhf" className="mt-4">
           <UhfRfidLive />

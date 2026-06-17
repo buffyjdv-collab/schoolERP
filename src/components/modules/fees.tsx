@@ -28,6 +28,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
+import { useCan } from '@/lib/store'
 
 function fmtINR(n: number) {
   if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`
@@ -40,6 +41,9 @@ const PIE_COLORS = ['#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#0ea5e9']
 const METHOD_ICONS: Record<string, any> = { Cash: Banknote, Card: CreditCard, Online: Smartphone, UPI: Smartphone }
 
 export function FeesModule() {
+  const canCollect = useCan()('fees', 'collect')
+  const canPay = useCan()('fees', 'pay')
+  const canCreate = useCan()('fees', 'create')
   const [tab, setTab] = useState('invoices')
   const [statusFilter, setStatusFilter] = useState('all')
   const [q, setQ] = useState('')
@@ -113,9 +117,9 @@ export function FeesModule() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="invoices">Invoices</TabsTrigger>
-          <TabsTrigger value="defaulters">Defaulters</TabsTrigger>
+          {canCollect && <TabsTrigger value="defaulters">Defaulters</TabsTrigger>}
           <TabsTrigger value="structures">Fee Structure</TabsTrigger>
-          <TabsTrigger value="accounting">Accounting</TabsTrigger>
+          {canCollect && <TabsTrigger value="accounting">Accounting</TabsTrigger>}
         </TabsList>
 
         {/* Invoices tab */}
@@ -168,7 +172,7 @@ export function FeesModule() {
                       <TableCell className="text-right">
                         {inv.status !== 'Paid' ? (
                           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPayInvoice(inv)}>
-                            <IndianRupee className="size-3" /> Collect
+                            <IndianRupee className="size-3" /> {(canCollect || canPay) ? (canPay && !canCollect ? 'Pay' : 'Collect') : 'View'}
                           </Button>
                         ) : (
                           <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => toast.info(`Receipt ${inv.invoiceNo} ready`)}>Receipt</Button>
@@ -205,7 +209,7 @@ export function FeesModule() {
                       <TableCell><Badge variant="outline">{inv.className}</Badge></TableCell>
                       <TableCell className="text-right tabular-nums font-semibold text-rose-600">₹{inv.balance.toLocaleString('en-IN')}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{inv.paymentDate ? new Date(inv.paymentDate).toLocaleDateString('en-IN') : 'Never'}</TableCell>
-                      <TableCell className="text-right"><Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPayInvoice(inv)}>Collect</Button></TableCell>
+                      <TableCell className="text-right"><Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPayInvoice(inv)}>{canPay && !canCollect ? 'Pay' : 'Collect'}</Button></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -217,7 +221,7 @@ export function FeesModule() {
         {/* Fee structures tab */}
         <TabsContent value="structures" className="mt-4">
           <Card><CardContent className="p-4">
-            <SectionHeader title="Fee Structure by Class" description="Annual fee configuration for academic year 2026-27" action={<Button size="sm" variant="outline" onClick={() => toast.info('Open fee structure editor')}><FileText className="size-4 mr-1.5" /> Add Structure</Button>} />
+            <SectionHeader title="Fee Structure by Class" description="Annual fee configuration for academic year 2026-27" action={canCreate ? <Button size="sm" variant="outline" onClick={() => toast.info('Open fee structure editor')}><FileText className="size-4 mr-1.5" /> Add Structure</Button> : undefined} />
             <div className="rounded-lg border overflow-hidden">
               <Table>
                 <TableHeader><TableRow><TableHead>Class</TableHead><TableHead>Fee Type</TableHead><TableHead>Frequency</TableHead><TableHead className="text-right">Amount</TableHead><TableHead>Due Date</TableHead></TableRow></TableHeader>

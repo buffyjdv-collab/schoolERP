@@ -22,6 +22,7 @@ export const api = {
     classDistribution: () => jfetch<{ label: string; value: number }[]>('/api/dashboard/class-distribution'),
     genderRatio: () => jfetch<{ label: string; value: number }[]>('/api/dashboard/gender-ratio'),
     recentActivity: () => jfetch<{ id: string; type: string; text: string; time: string }[]>('/api/dashboard/activity'),
+    me: () => jfetch<any>('/api/dashboard/me'),
   },
   students: {
     list: (params?: { q?: string; classId?: string; status?: string }) => {

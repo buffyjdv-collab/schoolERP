@@ -30,7 +30,7 @@ import { toast } from 'sonner'
 import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer,
 } from 'recharts'
-import { useStore } from '@/lib/store'
+import { useStore, useCan } from '@/lib/store'
 
 function initials(name: string) {
   return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
@@ -38,6 +38,7 @@ function initials(name: string) {
 
 export function StudentsModule() {
   const { searchQuery } = useStore()
+  const canCreate = useCan()('students', 'create')
   const [localSearch, setLocalSearch] = useState('')
   const [classFilter, setClassFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -104,7 +105,7 @@ export function StudentsModule() {
             <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={() => toast.info('Export started — CSV will download shortly')}>
               <Download className="size-4" />
             </Button>
-            <AddStudentDialog open={addOpen} onOpenChange={setAddOpen} classes={classes || []} onCreate={(d) => createMut.mutate(d)} loading={createMut.isPending} />
+            {canCreate && <AddStudentDialog open={addOpen} onOpenChange={setAddOpen} classes={classes || []} onCreate={(d) => createMut.mutate(d)} loading={createMut.isPending} />}
           </div>
 
           <div className="rounded-lg border max-h-[60vh] overflow-y-auto scroll-thin">

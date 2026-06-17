@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getCurrentUser } from '@/lib/auth'
 
 function getToday(): Date {
   const d = new Date()
@@ -8,6 +9,13 @@ function getToday(): Date {
 }
 
 export async function GET() {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Staff-only aggregated stats; students/parents should use /api/dashboard/me
+  if (user.role !== 'super_admin' && user.role !== 'admin' && user.role !== 'teacher') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   const today = getToday()
   const [
     totalStudents, totalEmployees, totalClasses, presentToday, absentToday,

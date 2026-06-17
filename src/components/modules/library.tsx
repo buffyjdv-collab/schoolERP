@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { Book, LibraryIssue, Student } from '@/lib/types'
+import { useCan } from '@/lib/store'
 import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
 import {
   Card, CardContent, CardHeader, CardTitle,
@@ -143,6 +144,7 @@ function IssueBookDialog({ book, open, onOpenChange }: { book: Book | null; open
 
 // ============ Catalog tab ============
 function CatalogTab() {
+  const canIssue = useCan()('library', 'issue')
   const [q, setQ] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
   const [issueBook, setIssueBook] = useState<Book | null>(null)
@@ -215,15 +217,21 @@ function CatalogTab() {
                       <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">{b.rack || '—'}</TableCell>
                       <TableCell className="text-right hidden sm:table-cell text-xs tabular-nums">{fmtINR(b.price)}</TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant={out ? 'outline' : 'default'}
-                          disabled={out}
-                          className="gap-1.5 h-8"
-                          onClick={() => { setIssueBook(b); setIssueOpen(true) }}
-                        >
-                          <BookMarked className="size-3.5" /> {out ? 'Unavailable' : 'Issue'}
-                        </Button>
+                        {canIssue ? (
+                          <Button
+                            size="sm"
+                            variant={out ? 'outline' : 'default'}
+                            disabled={out}
+                            className="gap-1.5 h-8"
+                            onClick={() => { setIssueBook(b); setIssueOpen(true) }}
+                          >
+                            <BookMarked className="size-3.5" /> {out ? 'Unavailable' : 'Issue'}
+                          </Button>
+                        ) : out ? (
+                          <span className="text-xs text-rose-600">Unavailable</span>
+                        ) : (
+                          <span className="text-xs text-emerald-600">Available</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   )
@@ -234,13 +242,16 @@ function CatalogTab() {
         )}
       </CardContent>
 
-      <IssueBookDialog book={issueBook} open={issueOpen} onOpenChange={setIssueOpen} />
+      {canIssue && (
+        <IssueBookDialog book={issueBook} open={issueOpen} onOpenChange={setIssueOpen} />
+      )}
     </Card>
   )
 }
 
 // ============ Issued Books tab ============
 function IssuedTab() {
+  const canReturn = useCan()('library', 'return')
   const qc = useQueryClient()
   const { data: issues, isLoading } = useQuery({ queryKey: ['library', 'issues'], queryFn: api.library.issues })
 
@@ -307,15 +318,19 @@ function IssuedTab() {
                       </TableCell>
                       <TableCell className="text-right">
                         {it.status === 'Issued' ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={returnMut.isPending}
-                            onClick={() => returnMut.mutate(it.id)}
-                            className="gap-1.5 h-8"
-                          >
-                            <RotateCcw className="size-3.5" /> Return
-                          </Button>
+                          canReturn ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={returnMut.isPending}
+                              onClick={() => returnMut.mutate(it.id)}
+                              className="gap-1.5 h-8"
+                            >
+                              <RotateCcw className="size-3.5" /> Return
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Issued</span>
+                          )
                         ) : (
                           <span className="text-xs text-muted-foreground">{it.returnDate ? fmtDate(it.returnDate) : '—'}</span>
                         )}

@@ -332,6 +332,56 @@ async function main() {
     })
   }
 
+  // ============ RBAC USERS ============
+  const { scryptSync, randomBytes } = await import('crypto')
+  function hash(pw: string) {
+    const salt = randomBytes(16).toString('hex')
+    const hash = scryptSync(pw, salt, 64).toString('hex')
+    return `${salt}:${hash}`
+  }
+
+  // Clear existing users (idempotent)
+  await db.user.deleteMany({})
+
+  // Super Admin
+  await db.user.create({ data: { email: 'superadmin@vidyamatrix.edu', name: 'Super Admin', passwordHash: hash('super123'), role: 'super_admin' } })
+
+  // Admin (linked to Principal employee)
+  const principal = await db.employee.findFirst({ where: { designation: 'Principal' } })
+  await db.user.create({ data: { email: 'admin@vidyamatrix.edu', name: principal ? `${principal.firstName} ${principal.lastName}` : 'School Admin', passwordHash: hash('admin123'), role: 'admin', employeeId: principal?.id } })
+
+  // Teacher (linked to an employee, assigned 2 classes)
+  const teacherEmp = await db.employee.findFirst({ where: { designation: { in: ['Senior Teacher', 'Teacher'] } } })
+  const twoClasses = await db.class.findMany({ take: 2, orderBy: { name: 'asc' } })
+  await db.user.create({ data: {
+    email: 'teacher@vidyamatrix.edu', name: teacherEmp ? `${teacherEmp.firstName} ${teacherEmp.lastName}` : 'Demo Teacher',
+    passwordHash: hash('teacher123'), role: 'teacher', employeeId: teacherEmp?.id,
+    teacherClasses: { create: twoClasses.map(c => ({ classId: c.id })) },
+  } })
+
+  // Student (linked to a real student)
+  const studentRec = await db.student.findFirst({ where: { status: 'Active' }, include: { class: true } })
+  if (studentRec) {
+    await db.user.create({ data: {
+      email: 'student@vidyamatrix.edu', name: `${studentRec.firstName} ${studentRec.lastName}`,
+      passwordHash: hash('student123'), role: 'student', studentId: studentRec.id,
+    } })
+  }
+
+  // Parent (linked to 2 students as children — make them siblings)
+  const parentStudent1 = await db.student.findFirst({ where: { status: 'Active', NOT: { id: studentRec?.id } }, orderBy: { admissionNo: 'asc' } })
+  const parentStudent2 = await db.student.findFirst({ where: { status: 'Active', id: { not: parentStudent1?.id }, classId: parentStudent1?.classId }, orderBy: { admissionNo: 'asc' } })
+  if (parentStudent1 && parentStudent2) {
+    await db.user.create({ data: {
+      email: 'parent@vidyamatrix.edu', name: `${parentStudent1.fatherName || 'Demo Parent'}`,
+      passwordHash: hash('parent123'), role: 'parent',
+      parentLinks: { create: [{ studentId: parentStudent1.id }, { studentId: parentStudent2.id }] },
+    } })
+  }
+
+  console.log(`RBAC Users: ${await db.user.count()}`)
+  console.log(`Teacher classes: ${await db.teacherClass.count()}`)
+  console.log(`Parent-child links: ${await db.parentChild.count()}`)
   console.log('Seed complete!')
   console.log(`Students: ${await db.student.count()}`)
   console.log(`Employees: ${await db.employee.count()}`)

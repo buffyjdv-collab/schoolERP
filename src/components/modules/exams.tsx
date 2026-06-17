@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { Exam, ExamMark, Student } from '@/lib/types'
+import { useCan, useStore } from '@/lib/store'
 import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
@@ -125,13 +126,41 @@ function MarksSheetTab({
   exam: Exam
   classId: string
 }) {
+  const user = useStore((s) => s.user)
+  const isParent = user?.role === 'parent'
+  const childIds = isParent ? (user?.childrenStudentIds ?? []) : []
+
   const marksQ = useQuery({
     queryKey: ['exams', 'marks', exam.id, classId],
     queryFn: () => api.exams.marks(exam.id, classId || undefined),
     enabled: !!exam.id,
   })
 
-  const marks = marksQ.data ?? []
+  const allMarks = marksQ.data ?? []
+
+  // Parent: client-side filter to a single selected child. The backend
+  // already scopes the response to all of the parent's children — we just
+  // narrow it further to one child for a cleaner per-child view.
+  const childrenWithMarks = isParent
+    ? childIds
+      .map((id) => {
+        const m = allMarks.find((r) => r.studentId === id)
+        return m ? { id, name: m.studentName } : null
+      })
+      .filter((x): x is { id: string; name: string } => !!x)
+    : []
+
+  const [selectedChildId, setSelectedChildId] = useState<string>('')
+  const effectiveChildId = selectedChildId || (childrenWithMarks[0]?.id ?? '')
+
+  const marks = isParent && effectiveChildId
+    ? allMarks.filter((m) => m.studentId === effectiveChildId)
+    : allMarks
+
+  // NOTE: any future marks-entry input / cell-editing UI MUST be wrapped in
+  // `useCan()('exams','enter')` so only teachers/admins can edit. The sheet
+  // below is read-only display — students/parents see only their own /
+  // children's marks (the backend enforces scoping).
 
   const { subjects, rows, subjectAverages } = useMemo(() => {
     const subjectSet = new Map<string, { name: string; max: number }>()
@@ -204,6 +233,23 @@ function MarksSheetTab({
             <Award className="size-3" /> Avg {subjectAverages.length ? Math.round(subjectAverages.reduce((a, s) => a + s.pct, 0) / subjectAverages.length) : 0}%
           </Badge>
         </div>
+        {isParent && childrenWithMarks.length > 1 && (
+          <div className="flex items-center gap-2 mt-3 pt-3 border-t">
+            <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+              <GraduationCap className="size-3.5" /> Child
+            </span>
+            <Select value={effectiveChildId} onValueChange={setSelectedChildId}>
+              <SelectTrigger size="sm" className="min-w-[220px]">
+                <SelectValue placeholder="Select child" />
+              </SelectTrigger>
+              <SelectContent>
+                {childrenWithMarks.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </CardHeader>
       <CardContent className="px-0 pb-0">
         <div className="max-h-[60vh] overflow-auto scroll-thin border-t">
@@ -738,6 +784,13 @@ function AnalysisTab({
 // Main module
 // ============================================================
 export function ExamsModule() {
+  const can = useCan()
+  const user = useStore((s) => s.user)
+  const canEnter = can('exams', 'enter')
+  // Students/parents: backend already scopes marks to their own/children's,
+  // so the class selector is meaningless for them — hide it.
+  const isStudentOrParent = user?.role === 'student' || user?.role === 'parent'
+
   const examsQ = useQuery({ queryKey: ['exams', 'list'], queryFn: api.exams.list })
   const classesQ = useQuery({ queryKey: ['academics', 'classes'], queryFn: api.academics.classes })
 
@@ -749,7 +802,9 @@ export function ExamsModule() {
   const selectedExam = exams.find((e) => e.id === effectiveSelectedId) || null
 
   const [classId, setClassId] = useState<string>('')
-  const effectiveClassId = classId || (classes[0]?.id ?? '')
+  // For staff: default to first class so the marks sheet is populated.
+  // For students/parents: leave empty — the backend scopes by role anyway.
+  const effectiveClassId = isStudentOrParent ? '' : (classId || (classes[0]?.id ?? ''))
 
   // Total stats
   const totalExams = exams.length
@@ -855,16 +910,27 @@ export function ExamsModule() {
                   <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
                     <GraduationCap className="size-3.5" /> Class
                   </span>
-                  <Select value={effectiveClassId} onValueChange={setClassId}>
-                    <SelectTrigger size="sm" className="w-44">
-                      <SelectValue placeholder="All classes" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {classes.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {isStudentOrParent ? (
+                    <span className="text-xs text-muted-foreground italic">
+                      {user?.role === 'parent' ? "Scoped to your children" : 'Scoped to your record'}
+                    </span>
+                  ) : (
+                    <Select value={effectiveClassId} onValueChange={setClassId}>
+                      <SelectTrigger size="sm" className="w-44">
+                        <SelectValue placeholder="All classes" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {classes.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {canEnter && (
+                    <Badge variant="outline" className="ml-auto text-[10px] gap-1 text-emerald-700 dark:text-emerald-400">
+                      <CheckCircle2 className="size-3" /> Can enter marks
+                    </Badge>
+                  )}
                 </div>
               </Card>
 

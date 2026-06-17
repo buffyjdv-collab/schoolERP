@@ -28,7 +28,7 @@ function fmtINR(n: number) {
   return `₹${n}`
 }
 
-export function DashboardModule() {
+export function AdminDashboard() {
   const { setModule, setAiAssistantOpen } = useStore()
   const [insightsLoading, setInsightsLoading] = useState(false)
   const [insights, setInsights] = useState<string>('')

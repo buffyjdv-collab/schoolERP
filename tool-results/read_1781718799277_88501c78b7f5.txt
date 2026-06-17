@@ -1,0 +1,723 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useEffect, useRef, useState } from 'react'
+     4→     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→     5→import { api } from '@/lib/api'
+     6→     6→import type { ClassInfo, Student } from '@/lib/types'
+     7→     7→import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
+     8→     8→import {
+     9→     9→  Card, CardContent, CardHeader, CardTitle, CardDescription,
+    10→    10→} from '@/components/ui/card'
+    11→    11→import { Button } from '@/components/ui/button'
+    12→    12→import { Badge } from '@/components/ui/badge'
+    13→    13→import { Skeleton } from '@/components/ui/skeleton'
+    14→    14→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    15→    15→import {
+    16→    16→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+    17→    17→} from '@/components/ui/table'
+    18→    18→import {
+    19→    19→  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+    20→    20→} from '@/components/ui/select'
+    21→    21→import {
+    22→    22→  CalendarCheck, UserCheck, UserX, Clock3, Plane, Radio, Cpu,
+    23→    23→  DoorOpen, LogIn, Save, CheckCheck, RefreshCw, GraduationCap, ScanLine,
+    24→    24→} from 'lucide-react'
+    25→    25→import { toast } from 'sonner'
+    26→    26→import { cn } from '@/lib/utils'
+    27→    27→
+    28→    28→// ============================================================
+    29→    29→// Attendance status meta
+    30→    30→// ============================================================
+    31→    31→type AttStatus = 'Present' | 'Absent' | 'Late' | 'Leave' | 'HalfDay'
+    32→    32→
+    33→    33→const STATUS_META: Record<AttStatus, { label: string; active: string; idle: string; dot: string }> = {
+    34→    34→  Present: {
+    35→    35→    label: 'P',
+    36→    36→    active: 'bg-emerald-500 text-white shadow-sm hover:bg-emerald-600',
+    37→    37→    idle: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20',
+    38→    38→    dot: 'bg-emerald-500',
+    39→    39→  },
+    40→    40→  Absent: {
+    41→    41→    label: 'A',
+    42→    42→    active: 'bg-rose-500 text-white shadow-sm hover:bg-rose-600',
+    43→    43→    idle: 'bg-rose-500/10 text-rose-700 dark:text-rose-400 hover:bg-rose-500/20',
+    44→    44→    dot: 'bg-rose-500',
+    45→    45→  },
+    46→    46→  Late: {
+    47→    47→    label: 'L',
+    48→    48→    active: 'bg-amber-500 text-white shadow-sm hover:bg-amber-600',
+    49→    49→    idle: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20',
+    50→    50→    dot: 'bg-amber-500',
+    51→    51→  },
+    52→    52→  Leave: {
+    53→    53→    label: 'LV',
+    54→    54→    active: 'bg-sky-500 text-white shadow-sm hover:bg-sky-600',
+    55→    55→    idle: 'bg-sky-500/10 text-sky-700 dark:text-sky-400 hover:bg-sky-500/20',
+    56→    56→    dot: 'bg-sky-500',
+    57→    57→  },
+    58→    58→  HalfDay: {
+    59→    59→    label: 'HD',
+    60→    60→    active: 'bg-violet-500 text-white shadow-sm hover:bg-violet-600',
+    61→    61→    idle: 'bg-violet-500/10 text-violet-700 dark:text-violet-400 hover:bg-violet-500/20',
+    62→    62→    dot: 'bg-violet-500',
+    63→    63→  },
+    64→    64→}
+    65→    65→
+    66→    66→const STATUS_ORDER: AttStatus[] = ['Present', 'Absent', 'Late', 'Leave', 'HalfDay']
+    67→    67→
+    68→    68→function todayStr(): string {
+    69→    69→  const d = new Date()
+    70→    70→  const y = d.getFullYear()
+    71→    71→  const m = String(d.getMonth() + 1).padStart(2, '0')
+    72→    72→  const day = String(d.getDate()).padStart(2, '0')
+    73→    73→  return `${y}-${m}-${day}`
+    74→    74→}
+    75→    75→
+    76→    76→function rateColor(r: number): string {
+    77→    77→  if (r >= 90) return 'bg-emerald-500'
+    78→    78→  if (r >= 75) return 'bg-amber-500'
+    79→    79→  return 'bg-rose-500'
+    80→    80→}
+    81→    81→
+    82→    82→// ============================================================
+    83→    83→// Mark Attendance panel (left pane)
+    84→    84→// ============================================================
+    85→    85→interface ClassAttRow {
+    86→    86→  student: {
+    87→    87→    id: string
+    88→    88→    admissionNo: string
+    89→    89→    firstName: string
+    90→    90→    lastName: string
+    91→    91→    fullName: string
+    92→    92→    rollNo?: number | null
+    93→    93→    sectionName?: string | null
+    94→    94→  }
+    95→    95→  status: string
+    96→    96→}
+    97→    97→
+    98→    98→function StatusButtonGroup({
+    99→    99→  value, onChange,
+   100→   100→}: {
+   101→   101→  value: AttStatus | 'NotMarked'
+   102→   102→  onChange: (s: AttStatus) => void
+   103→   103→}) {
+   104→   104→  return (
+   105→   105→    <div className="inline-flex items-center gap-1 rounded-lg bg-muted/40 p-0.5">
+   106→   106→      {STATUS_ORDER.map((s) => {
+   107→   107→        const meta = STATUS_META[s]
+   108→   108→        const active = value === s
+   109→   109→        return (
+   110→   110→          <button
+   111→   111→            key={s}
+   112→   112→            type="button"
+   113→   113→            onClick={() => onChange(s)}
+   114→   114→            title={s}
+   115→   115→            aria-pressed={active}
+   116→   116→            className={cn(
+   117→   117→              'size-7 rounded-md text-[11px] font-bold transition-all',
+   118→   118→              active ? meta.active : meta.idle,
+   119→   119→            )}
+   120→   120→          >
+   121→   121→            {meta.label}
+   122→   122→          </button>
+   123→   123→        )
+   124→   124→      })}
+   125→   125→    </div>
+   126→   126→  )
+   127→   127→}
+   128→   128→
+   129→   129→function MarkAttendancePanel({
+   130→   130→  classes,
+   131→   131→}: {
+   132→   132→  classes: ClassInfo[]
+   133→   133→}) {
+   134→   134→  const qc = useQueryClient()
+   135→   135→  const [classId, setClassId] = useState<string>('')
+   136→   136→  const [date, setDate] = useState<string>(todayStr())
+   137→   137→  const [edits, setEdits] = useState<Record<string, AttStatus>>({})
+   138→   138→
+   139→   139→  // Reset classId to first class on first load (no set-state-in-effect; safe initial state via useMemo)
+   140→   140→  const effectiveClassId = classId || (classes[0]?.id ?? '')
+   141→   141→
+   142→   142→  const attQ = useQuery({
+   143→   143→    queryKey: ['attendance', 'class', effectiveClassId, date],
+   144→   144→    queryFn: () => api.attendance.classAttendance(effectiveClassId, date),
+   145→   145→    enabled: !!effectiveClassId && !!date,
+   146→   146→  })
+   147→   147→
+   148→   148→  const rows: ClassAttRow[] = attQ.data ?? []
+   149→   149→
+   150→   150→  // Resolve the displayed status for a row — edits win over server status
+   151→   151→  const displayStatus = (r: ClassAttRow): AttStatus | 'NotMarked' => {
+   152→   152→    if (edits[r.student.id]) return edits[r.student.id]
+   153→   153→    if (r.status === 'NotMarked') return 'NotMarked'
+   154→   154→    return (STATUS_ORDER.includes(r.status as AttStatus) ? r.status : 'NotMarked') as AttStatus | 'NotMarked'
+   155→   155→  }
+   156→   156→
+   157→   157→  // Counts: computed inline (without useMemo) so the React Compiler can memoize automatically.
+   158→   158→  const counts = (() => {
+   159→   159→    const c = { Present: 0, Absent: 0, Late: 0, Leave: 0, HalfDay: 0, NotMarked: 0 }
+   160→   160→    for (const r of rows) {
+   161→   161→      const s = displayStatus(r)
+   162→   162→      if (s === 'NotMarked') c.NotMarked++
+   163→   163→      else c[s]++
+   164→   164→    }
+   165→   165→    return c
+   166→   166→  })()
+   167→   167→
+   168→   168→  const markMutation = useMutation({
+   169→   169→    mutationFn: (payload: { studentId: string; date: string; status: string; method?: string }) =>
+   170→   170→      api.attendance.mark(payload),
+   171→   171→  })
+   172→   172→
+   173→   173→  const handleSet = (studentId: string, s: AttStatus) => {
+   174→   174→    setEdits((prev) => ({ ...prev, [studentId]: s }))
+   175→   175→  }
+   176→   176→
+   177→   177→  const handleMarkAllPresent = () => {
+   178→   178→    const next: Record<string, AttStatus> = {}
+   179→   179→    for (const r of rows) next[r.student.id] = 'Present'
+   180→   180→    setEdits(next)
+   181→   181→    toast.info('Marked all as Present', { description: 'Review and click Save Attendance to commit.' })
+   182→   182→  }
+   183→   183→
+   184→   184→  const handleSave = async () => {
+   185→   185→    if (!rows.length) return
+   186→   186→    // Compute actual changes (edits that differ from server status)
+   187→   187→    const changed = rows
+   188→   188→      .map((r) => ({ studentId: r.student.id, status: edits[r.student.id], original: r.status }))
+   189→   189→      .filter((x) => x.status && x.status !== x.original)
+   190→   190→
+   191→   191→    if (changed.length === 0) {
+   192→   192→      toast.info('Nothing to save', { description: 'No attendance changes detected.' })
+   193→   193→      return
+   194→   194→    }
+   195→   195→
+   196→   196→    try {
+   197→   197→      await Promise.all(
+   198→   198→        changed.map((c) =>
+   199→   199→          markMutation.mutateAsync({
+   200→   200→            studentId: c.studentId,
+   201→   201→            date,
+   202→   202→            status: c.status as string,
+   203→   203→            method: 'Manual',
+   204→   204→          }),
+   205→   205→        ),
+   206→   206→      )
+   207→   207→      toast.success(`Attendance saved for ${changed.length} student${changed.length === 1 ? '' : 's'}`, {
+   208→   208→        description: `${counts.Present} Present · ${counts.Absent} Absent · ${counts.Late} Late`,
+   209→   209→      })
+   210→   210→      setEdits({})
+   211→   211→      qc.invalidateQueries({ queryKey: ['attendance', 'summary'] })
+   212→   212→      qc.invalidateQueries({ queryKey: ['attendance', 'class', effectiveClassId, date] })
+   213→   213→    } catch (e: any) {
+   214→   214→      toast.error('Failed to save attendance', { description: e?.message || 'Please retry.' })
+   215→   215→    }
+   216→   216→  }
+   217→   217→
+   218→   218→  const handleClassChange = (v: string) => {
+   219→   219→    setClassId(v)
+   220→   220→    setEdits({})
+   221→   221→  }
+   222→   222→  const handleDateChange = (v: string) => {
+   223→   223→    setDate(v)
+   224→   224→    setEdits({})
+   225→   225→  }
+   226→   226→
+   227→   227→  return (
+   228→   228→    <Card className="overflow-hidden">
+   229→   229→      <CardHeader className="pb-3">
+   230→   230→        <div className="flex flex-wrap items-center justify-between gap-3">
+   231→   231→          <div>
+   232→   232→            <CardTitle className="text-base flex items-center gap-2">
+   233→   233→              <CalendarCheck className="size-4 text-primary" /> Mark Attendance
+   234→   234→            </CardTitle>
+   235→   235→            <CardDescription className="text-xs mt-0.5">
+   236→   236→              Select a class &amp; date, then mark each student&apos;s status.
+   237→   237→            </CardDescription>
+   238→   238→          </div>
+   239→   239→          <div className="flex flex-wrap items-center gap-2">
+   240→   240→            <Select value={effectiveClassId} onValueChange={handleClassChange}>
+   241→   241→              <SelectTrigger size="sm" className="w-40">
+   242→   242→                <GraduationCap className="size-3.5 text-muted-foreground" />
+   243→   243→                <SelectValue placeholder="Select class" />
+   244→   244→              </SelectTrigger>
+   245→   245→              <SelectContent>
+   246→   246→                {classes.map((c) => (
+   247→   247→                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+   248→   248→                ))}
+   249→   249→              </SelectContent>
+   250→   250→            </Select>
+   251→   251→            <div className="relative">
+   252→   252→              <input
+   253→   253→                type="date"
+   254→   254→                value={date}
+   255→   255→                onChange={(e) => handleDateChange(e.target.value)}
+   256→   256→                className="h-8 rounded-md border border-input bg-transparent px-2.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] dark:bg-input/30"
+   257→   257→                aria-label="Attendance date"
+   258→   258→              />
+   259→   259→            </div>
+   260→   260→          </div>
+   261→   261→        </div>
+   262→   262→      </CardHeader>
+   263→   263→
+   264→   264→      <CardContent className="px-0 pb-0">
+   265→   265→        {/* Summary strip */}
+   266→   266→        <div className="px-6 pb-3 flex flex-wrap items-center gap-2 text-xs">
+   267→   267→          <Badge variant="secondary" className="gap-1">
+   268→   268→            <span className={cn('size-1.5 rounded-full', STATUS_META.Present.dot)} /> {counts.Present} Present
+   269→   269→          </Badge>
+   270→   270→          <Badge variant="secondary" className="gap-1">
+   271→   271→            <span className={cn('size-1.5 rounded-full', STATUS_META.Absent.dot)} /> {counts.Absent} Absent
+   272→   272→          </Badge>
+   273→   273→          <Badge variant="secondary" className="gap-1">
+   274→   274→            <span className={cn('size-1.5 rounded-full', STATUS_META.Late.dot)} /> {counts.Late} Late
+   275→   275→          </Badge>
+   276→   276→          <Badge variant="secondary" className="gap-1">
+   277→   277→            <span className={cn('size-1.5 rounded-full', STATUS_META.Leave.dot)} /> {counts.Leave} Leave
+   278→   278→          </Badge>
+   279→   279→          <Badge variant="secondary" className="gap-1">
+   280→   280→            <span className={cn('size-1.5 rounded-full', STATUS_META.HalfDay.dot)} /> {counts.HalfDay} HalfDay
+   281→   281→          </Badge>
+   282→   282→          <span className="ml-auto text-muted-foreground">Total: {rows.length}</span>
+   283→   283→        </div>
+   284→   284→
+   285→   285→        {/* Actions row */}
+   286→   286→        <div className="px-6 pb-3 flex flex-wrap items-center justify-end gap-2">
+   287→   287→          <Button size="sm" variant="outline" onClick={handleMarkAllPresent} disabled={!rows.length}>
+   288→   288→            <CheckCheck className="size-4" /> Mark All Present
+   289→   289→          </Button>
+   290→   290→          <Button
+   291→   291→            size="sm"
+   292→   292→            onClick={handleSave}
+   293→   293→            disabled={!rows.length || markMutation.isPending}
+   294→   294→          >
+   295→   295→            {markMutation.isPending ? <RefreshCw className="size-4 animate-spin" /> : <Save className="size-4" />}
+   296→   296→            Save Attendance
+   297→   297→          </Button>
+   298→   298→        </div>
+   299→   299→
+   300→   300→        {/* Table */}
+   301→   301→        {!effectiveClassId ? (
+   302→   302→          <div className="px-6 pb-6">
+   303→   303→            <EmptyState icon={GraduationCap} title="Select a class" description="Pick a class above to load the student roster." />
+   304→   304→          </div>
+   305→   305→        ) : attQ.isLoading ? (
+   306→   306→          <div className="px-6 pb-6 space-y-2">
+   307→   307→            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+   308→   308→          </div>
+   309→   309→        ) : attQ.isError ? (
+   310→   310→          <div className="px-6 pb-6">
+   311→   311→            <EmptyState icon={RefreshCw} title="Failed to load roster" description="Please retry in a moment." />
+   312→   312→          </div>
+   313→   313→        ) : rows.length === 0 ? (
+   314→   314→          <div className="px-6 pb-6">
+   315→   315→            <EmptyState icon={UserCheck} title="No students in this class" description="There are no active students enrolled in the selected class." />
+   316→   316→          </div>
+   317→   317→        ) : (
+   318→   318→          <div className="max-h-[60vh] overflow-y-auto scroll-thin border-t">
+   319→   319→            <Table>
+   320→   320→              <TableHeader className="sticky top-0 bg-card z-10">
+   321→   321→                <TableRow>
+   322→   322→                  <TableHead className="pl-6 w-12">#</TableHead>
+   323→   323→                  <TableHead>Adm. No.</TableHead>
+   324→   324→                  <TableHead>Student</TableHead>
+   325→   325→                  <TableHead className="hidden md:table-cell">Section</TableHead>
+   326→   326→                  <TableHead className="text-right pr-6">Status</TableHead>
+   327→   327→                </TableRow>
+   328→   328→              </TableHeader>
+   329→   329→              <TableBody>
+   330→   330→                {rows.map((r, idx) => {
+   331→   331→                  const s = displayStatus(r)
+   332→   332→                  const dirty = !!edits[r.student.id] && edits[r.student.id] !== r.status
+   333→   333→                  return (
+   334→   334→                    <TableRow key={r.student.id} className={cn(dirty && 'bg-primary/5')}>
+   335→   335→                      <TableCell className="pl-6 text-muted-foreground tabular-nums text-xs">{r.student.rollNo ?? idx + 1}</TableCell>
+   336→   336→                      <TableCell>
+   337→   337→                        <Badge variant="outline" className="text-[11px] tabular-nums">{r.student.admissionNo}</Badge>
+   338→   338→                      </TableCell>
+   339→   339→                      <TableCell className="font-medium">
+   340→   340→                        <div className="flex items-center gap-2">
+   341→   341→                          <div className="size-7 rounded-full bg-primary/10 text-primary grid place-items-center text-[10px] font-bold shrink-0">
+   342→   342→                            {r.student.firstName?.[0]}{r.student.lastName?.[0]}
+   343→   343→                          </div>
+   344→   344→                          <span className="truncate">{r.student.fullName}</span>
+   345→   345→                          {dirty && <span className="size-1.5 rounded-full bg-primary animate-pulse" title="Unsaved change" />}
+   346→   346→                        </div>
+   347→   347→                      </TableCell>
+   348→   348→                      <TableCell className="hidden md:table-cell text-muted-foreground text-xs">{r.student.sectionName || '-'}</TableCell>
+   349→   349→                      <TableCell className="pr-6">
+   350→   350→                        <div className="flex items-center justify-end gap-2">
+   351→   351→                          {s !== 'NotMarked' && (
+   352→   352→                            <span className="text-[11px] text-muted-foreground hidden sm:inline">{s}</span>
+   353→   353→                          )}
+   354→   354→                          <StatusButtonGroup
+   355→   355→                            value={s}
+   356→   356→                            onChange={(next) => handleSet(r.student.id, next)}
+   357→   357→                          />
+   358→   358→                        </div>
+   359→   359→                      </TableCell>
+   360→   360→                    </TableRow>
+   361→   361→                  )
+   362→   362→                })}
+   363→   363→              </TableBody>
+   364→   364→            </Table>
+   365→   365→          </div>
+   366→   366→        )}
+   367→   367→      </CardContent>
+   368→   368→    </Card>
+   369→   369→  )
+   370→   370→}
+   371→   371→
+   372→   372→// ============================================================
+   373→   373→// Class-wise attendance (right pane)
+   374→   374→// ============================================================
+   375→   375→function ClassWiseAttendance({
+   376→   376→  byClass, loading,
+   377→   377→}: {
+   378→   378→  byClass: { label: string; rate: number }[]
+   379→   379→  loading: boolean
+   380→   380→}) {
+   381→   381→  const max = 100
+   382→   382→  return (
+   383→   383→    <Card className="h-full">
+   384→   384→      <CardHeader className="pb-2">
+   385→   385→        <CardTitle className="text-base flex items-center gap-2">
+   386→   386→          <GraduationCap className="size-4 text-primary" /> Class-wise Attendance
+   387→   387→        </CardTitle>
+   388→   388→        <CardDescription className="text-xs">Today&apos;s present-rate by class.</CardDescription>
+   389→   389→      </CardHeader>
+   390→   390→      <CardContent>
+   391→   391→        {loading ? (
+   392→   392→          <div className="space-y-3">
+   393→   393→            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+   394→   394→          </div>
+   395→   395→        ) : byClass.length === 0 ? (
+   396→   396→          <EmptyState icon={GraduationCap} title="No data" description="Attendance records will appear here once marked." />
+   397→   397→        ) : (
+   398→   398→          <div className="max-h-[55vh] overflow-y-auto scroll-thin space-y-3 pr-1">
+   399→   399→            {byClass
+   400→   400→              .slice()
+   401→   401→              .sort((a, b) => b.rate - a.rate)
+   402→   402→              .map((c) => (
+   403→   403→                <div key={c.label} className="group">
+   404→   404→                  <div className="flex items-center justify-between mb-1">
+   405→   405→                    <span className="text-sm font-medium">{c.label}</span>
+   406→   406→                    <span className={cn(
+   407→   407→                      'text-xs font-semibold tabular-nums px-1.5 py-0.5 rounded',
+   408→   408→                      c.rate >= 90 ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+   409→   409→                        : c.rate >= 75 ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+   410→   410→                          : 'bg-rose-500/10 text-rose-700 dark:text-rose-400',
+   411→   411→                    )}>{c.rate}%</span>
+   412→   412→                  </div>
+   413→   413→                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+   414→   414→                    <div
+   415→   415→                      className={cn('h-full rounded-full transition-all', rateColor(c.rate))}
+   416→   416→                      style={{ width: `${Math.min(c.rate, max)}%` }}
+   417→   417→                    />
+   418→   418→                  </div>
+   419→   419→                </div>
+   420→   420→              ))}
+   421→   421→          </div>
+   422→   422→        )}
+   423→   423→      </CardContent>
+   424→   424→    </Card>
+   425→   425→  )
+   426→   426→}
+   427→   427→
+   428→   428→// ============================================================
+   429→   429→// UHF / RFID Live tab
+   430→   430→// ============================================================
+   431→   431→interface UhfEntry {
+   432→   432→  id: string
+   433→   433→  time: string
+   434→   434→  student: Student
+   435→   435→  action: 'IN' | 'OUT'
+   436→   436→  tag: string
+   437→   437→}
+   438→   438→
+   439→   439→function UhfRfidLive() {
+   440→   440→  const studentsQ = useQuery({
+   441→   441→    queryKey: ['students', 'list', 'uhf'],
+   442→   442→    queryFn: () => api.students.list({ status: 'Active' }),
+   443→   443→  })
+   444→   444→  const students = studentsQ.data ?? []
+   445→   445→
+   446→   446→  const [entries, setEntries] = useState<UhfEntry[]>([])
+   447→   447→  const [active, setActive] = useState(true)
+   448→   448→  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+   449→   449→  const counterRef = useRef(0)
+   450→   450→
+   451→   451→  useEffect(() => {
+   452→   452→    if (!active || students.length === 0) return
+   453→   453→
+   454→   454→    const pushEntry = () => {
+   455→   455→      const s = students[Math.floor(Math.random() * students.length)]
+   456→   456→      const isIn = Math.random() > 0.35
+   457→   457→      counterRef.current += 1
+   458→   458→      const entry: UhfEntry = {
+   459→   459→        id: `uhf-${Date.now()}-${counterRef.current}`,
+   460→   460→        time: new Date().toISOString(),
+   461→   461→        student: s,
+   462→   462→        action: isIn ? 'IN' : 'OUT',
+   463→   463→        tag: `E2 00 ${Math.random().toString(16).slice(2, 6).toUpperCase()} ${Math.random().toString(16).slice(2, 6).toUpperCase()}`,
+   464→   464→      }
+   465→   465→      setEntries((prev) => [entry, ...prev].slice(0, 10))
+   466→   466→    }
+   467→   467→
+   468→   468→    // schedule first push with a short delay so the panel feels alive immediately
+   469→   469→    timerRef.current = setTimeout(function tick() {
+   470→   470→      pushEntry()
+   471→   471→      timerRef.current = setTimeout(tick, 3000 + Math.random() * 2000)
+   472→   472→    }, 800)
+   473→   473→
+   474→   474→    return () => {
+   475→   475→      if (timerRef.current) clearTimeout(timerRef.current)
+   476→   476→    }
+   477→   477→  }, [active, students])
+   478→   478→
+   479→   479→  return (
+   480→   480→    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+   481→   481→      {/* Reader info card */}
+   482→   482→      <Card className="lg:col-span-1 border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
+   483→   483→        <CardHeader className="pb-3">
+   484→   484→          <div className="flex items-start justify-between gap-3">
+   485→   485→            <div className="flex items-center gap-3">
+   486→   486→              <div className="size-11 rounded-xl bg-primary text-primary-foreground grid place-items-center">
+   487→   487→                <Radio className="size-6" />
+   488→   488→              </div>
+   489→   489→              <div>
+   490→   490→                <CardTitle className="text-base">UHF Gate Reader</CardTitle>
+   491→   491→                <CardDescription className="text-xs">Main Gate · Reader #VM-UHF-01</CardDescription>
+   492→   492→              </div>
+   493→   493→            </div>
+   494→   494→            <span className={cn(
+   495→   495→              'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium',
+   496→   496→              active ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-muted-foreground',
+   497→   497→            )}>
+   498→   498→              <span className={cn('size-1.5 rounded-full', active ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground')} />
+   499→   499→              {active ? 'System Active' : 'Paused'}
+   500→   500→            </span>
+   501→   501→          </div>
+   502→   502→        </CardHeader>
+   503→   503→        <CardContent className="space-y-4">
+   504→   504→          <div className="grid grid-cols-2 gap-3 text-sm">
+   505→   505→            <div className="rounded-lg border p-3">
+   506→   506→              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Frequency</p>
+   507→   507→              <p className="font-semibold tabular-nums">865–868 MHz</p>
+   508→   508→            </div>
+   509→   509→            <div className="rounded-lg border p-3">
+   510→   510→              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Protocol</p>
+   511→   511→              <p className="font-semibold">EPC Gen2</p>
+   512→   512→            </div>
+   513→   513→            <div className="rounded-lg border p-3">
+   514→   514→              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Read Range</p>
+   515→   515→              <p className="font-semibold tabular-nums">~6 m</p>
+   516→   516→            </div>
+   517→   517→            <div className="rounded-lg border p-3">
+   518→   518→              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Today&apos;s Reads</p>
+   519→   519→              <p className="font-semibold tabular-nums">{entries.length}</p>
+   520→   520→            </div>
+   521→   521→          </div>
+   522→   522→
+   523→   523→          <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-3 text-xs">
+   524→   524→            <div className="flex items-center gap-2 mb-1.5">
+   525→   525→              <Cpu className="size-3.5 text-primary" />
+   526→   526→              <span className="font-semibold">Reader Health</span>
+   527→   527→            </div>
+   528→   528→            <div className="grid grid-cols-3 gap-2 text-center">
+   529→   529→              <div>
+   530→   530→                <p className="font-bold tabular-nums text-emerald-600">98%</p>
+   531→   531→                <p className="text-[10px] text-muted-foreground">Uptime</p>
+   532→   532→              </div>
+   533→   533→              <div>
+   534→   534→                <p className="font-bold tabular-nums">-58</p>
+   535→   535→                <p className="text-[10px] text-muted-foreground">RSSI dBm</p>
+   536→   536→              </div>
+   537→   537→              <div>
+   538→   538→                <p className="font-bold tabular-nums">0</p>
+   539→   539→                <p className="text-[10px] text-muted-foreground">Errors</p>
+   540→   540→              </div>
+   541→   541→            </div>
+   542→   542→          </div>
+   543→   543→
+   544→   544→          <Button
+   545→   545→            variant={active ? 'outline' : 'default'}
+   546→   546→            size="sm"
+   547→   547→            className="w-full"
+   548→   548→            onClick={() => setActive((a) => !a)}
+   549→   549→          >
+   550→   550→            {active ? <><RefreshCw className="size-4" /> Pause Feed</> : <><Radio className="size-4" /> Resume Feed</>}
+   551→   551→          </Button>
+   552→   552→        </CardContent>
+   553→   553→      </Card>
+   554→   554→
+   555→   555→      {/* Live feed */}
+   556→   556→      <Card className="lg:col-span-2">
+   557→   557→        <CardHeader className="pb-3">
+   558→   558→          <div className="flex items-center justify-between gap-3">
+   559→   559→            <CardTitle className="text-base flex items-center gap-2">
+   560→   560→              <ScanLine className="size-4 text-primary" /> Live Tag Reads
+   561→   561→            </CardTitle>
+   562→   562→            <Badge variant="secondary" className="gap-1 text-[11px]">
+   563→   563→              <span className={cn('size-1.5 rounded-full', active ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground')} />
+   564→   564→              {active ? 'Streaming' : 'Paused'} · Last 10
+   565→   565→            </Badge>
+   566→   566→          </div>
+   567→   567→        </CardHeader>
+   568→   568→        <CardContent className="px-0 pb-0">
+   569→   569→          {studentsQ.isLoading ? (
+   570→   570→            <div className="px-6 pb-6 space-y-2">
+   571→   571→              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+   572→   572→            </div>
+   573→   573→          ) : entries.length === 0 ? (
+   574→   574→            <div className="px-6 pb-6">
+   575→   575→              <EmptyState icon={ScanLine} title="Waiting for tag reads" description="The reader is online and listening for student ID cards." />
+   576→   576→            </div>
+   577→   577→          ) : (
+   578→   578→            <div className="max-h-[60vh] overflow-y-auto scroll-thin border-t">
+   579→   579→              <Table>
+   580→   580→                <TableHeader className="sticky top-0 bg-card z-10">
+   581→   581→                  <TableRow>
+   582→   582→                    <TableHead className="pl-6 w-16">Dir</TableHead>
+   583→   583→                    <TableHead>Student</TableHead>
+   584→   584→                    <TableHead className="hidden md:table-cell">Class</TableHead>
+   585→   585→                    <TableHead className="hidden lg:table-cell">EPC Tag</TableHead>
+   586→   586→                    <TableHead className="pr-6 text-right">Time</TableHead>
+   587→   587→                  </TableRow>
+   588→   588→                </TableHeader>
+   589→   589→                <TableBody>
+   590→   590→                  {entries.map((e) => (
+   591→   591→                    <TableRow key={e.id} className="animate-in fade-in slide-in-from-top-1 duration-300">
+   592→   592→                      <TableCell className="pl-6">
+   593→   593→                        <span className={cn(
+   594→   594→                          'inline-flex items-center justify-center size-7 rounded-lg',
+   595→   595→                          e.action === 'IN' ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600',
+   596→   596→                        )} title={e.action === 'IN' ? 'Entry' : 'Exit'}>
+   597→   597→                          {e.action === 'IN' ? <LogIn className="size-4" /> : <DoorOpen className="size-4" />}
+   598→   598→                        </span>
+   599→   599→                      </TableCell>
+   600→   600→                      <TableCell>
+   601→   601→                        <div className="flex items-center gap-2.5 min-w-0">
+   602→   602→                          <div className="size-7 rounded-full bg-primary/10 text-primary grid place-items-center text-[10px] font-bold shrink-0">
+   603→   603→                            {e.student.firstName?.[0]}{e.student.lastName?.[0]}
+   604→   604→                          </div>
+   605→   605→                          <div className="min-w-0">
+   606→   606→                            <p className="font-medium text-sm truncate">{e.student.fullName}</p>
+   607→   607→                            <p className="text-[11px] text-muted-foreground tabular-nums">{e.student.admissionNo}</p>
+   608→   608→                          </div>
+   609→   609→                        </div>
+   610→   610→                      </TableCell>
+   611→   611→                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{e.student.className || '-'}</TableCell>
+   612→   612→                      <TableCell className="hidden lg:table-cell">
+   613→   613→                        <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded tabular-nums">{e.tag}</code>
+   614→   614→                      </TableCell>
+   615→   615→                      <TableCell className="pr-6 text-right text-xs text-muted-foreground tabular-nums">
+   616→   616→                        {new Date(e.time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+   617→   617→                      </TableCell>
+   618→   618→                    </TableRow>
+   619→   619→                  ))}
+   620→   620→                </TableBody>
+   621→   621→              </Table>
+   622→   622→            </div>
+   623→   623→          )}
+   624→   624→        </CardContent>
+   625→   625→      </Card>
+   626→   626→    </div>
+   627→   627→  )
+   628→   628→}
+   629→   629→
+   630→   630→// ============================================================
+   631→   631→// Main module
+   632→   632→// ============================================================
+   633→   633→export function AttendanceModule() {
+   634→   634→  const summaryQ = useQuery({ queryKey: ['attendance', 'summary'], queryFn: () => api.attendance.summary() })
+   635→   635→  const classesQ = useQuery({ queryKey: ['academics', 'classes'], queryFn: api.academics.classes })
+   636→   636→
+   637→   637→  const summary = summaryQ.data
+   638→   638→  const byClass = summary?.byClass ?? []
+   639→   639→
+   640→   640→  return (
+   641→   641→    <div className="space-y-6">
+   642→   642→      <SectionHeader
+   643→   643→        title="Attendance"
+   644→   644→        description="Mark daily attendance, monitor class-wise rates, and view live UHF/RFID gate reads."
+   645→   645→      />
+   646→   646→
+   647→   647→      {/* Stat cards */}
+   648→   648→      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+   649→   649→        <StatCard
+   650→   650→          label="Attendance Rate"
+   651→   651→          value={summary ? `${summary.rate}%` : '—'}
+   652→   652→          sub="Today's overall"
+   653→   653→          icon={CalendarCheck}
+   654→   654→          accent="primary"
+   655→   655→          loading={summaryQ.isLoading}
+   656→   656→        />
+   657→   657→        <StatCard
+   658→   658→          label="Present Today"
+   659→   659→          value={summary?.present ?? '—'}
+   660→   660→          sub="Marked present"
+   661→   661→          icon={UserCheck}
+   662→   662→          accent="emerald"
+   663→   663→          loading={summaryQ.isLoading}
+   664→   664→        />
+   665→   665→        <StatCard
+   666→   666→          label="Absent Today"
+   667→   667→          value={summary?.absent ?? '—'}
+   668→   668→          sub="Needs follow-up"
+   669→   669→          icon={UserX}
+   670→   670→          accent="rose"
+   671→   671→          loading={summaryQ.isLoading}
+   672→   672→        />
+   673→   673→        <StatCard
+   674→   674→          label="Late Today"
+   675→   675→          value={summary?.late ?? '—'}
+   676→   676→          sub="Arrived after bell"
+   677→   677→          icon={Clock3}
+   678→   678→          accent="amber"
+   679→   679→          loading={summaryQ.isLoading}
+   680→   680→        />
+   681→   681→        <StatCard
+   682→   682→          label="On Leave"
+   683→   683→          value={summary?.leave ?? '—'}
+   684→   684→          sub="Approved leaves"
+   685→   685→          icon={Plane}
+   686→   686→          accent="sky"
+   687→   687→          loading={summaryQ.isLoading}
+   688→   688→        />
+   689→   689→      </div>
+   690→   690→
+   691→   691→      <Tabs defaultValue="mark">
+   692→   692→        <TabsList>
+   693→   693→          <TabsTrigger value="mark" className="gap-1.5"><CalendarCheck className="size-4" /> Mark Attendance</TabsTrigger>
+   694→   694→          <TabsTrigger value="uhf" className="gap-1.5"><Radio className="size-4" /> UHF / RFID Live</TabsTrigger>
+   695→   695→        </TabsList>
+   696→   696→
+   697→   697→        <TabsContent value="mark" className="mt-4">
+   698→   698→          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+   699→   699→            <div className="lg:col-span-2">
+   700→   700→              {classesQ.isLoading ? (
+   701→   701→                <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+   702→   702→              ) : classesQ.isError ? (
+   703→   703→                <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load classes" description="Please retry." /></CardContent></Card>
+   704→   704→              ) : (classesQ.data ?? []).length === 0 ? (
+   705→   705→                <Card><CardContent className="py-2"><EmptyState icon={GraduationCap} title="No classes found" description="Set up classes in Academics to mark attendance." /></CardContent></Card>
+   706→   706→              ) : (
+   707→   707→                <MarkAttendancePanel classes={classesQ.data!} />
+   708→   708→              )}
+   709→   709→            </div>
+   710→   710→            <div className="lg:col-span-1">
+   711→   711→              <ClassWiseAttendance byClass={byClass} loading={summaryQ.isLoading} />
+   712→   712→            </div>
+   713→   713→          </div>
+   714→   714→        </TabsContent>
+   715→   715→
+   716→   716→        <TabsContent value="uhf" className="mt-4">
+   717→   717→          <UhfRfidLive />
+   718→   718→        </TabsContent>
+   719→   719→      </Tabs>
+   720→   720→    </div>
+   721→   721→  )
+   722→   722→}
+   723→   723→

@@ -1,0 +1,897 @@
+     1→'use client'
+     2→
+     3→import { useMemo, useState } from 'react'
+     4→import { useQuery } from '@tanstack/react-query'
+     5→import { api } from '@/lib/api'
+     6→import type { Exam, ExamMark, Student } from '@/lib/types'
+     7→import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
+     8→import {
+     9→  Card, CardContent, CardHeader, CardTitle, CardDescription,
+    10→} from '@/components/ui/card'
+    11→import { Button } from '@/components/ui/button'
+    12→import { Badge } from '@/components/ui/badge'
+    13→import { Skeleton } from '@/components/ui/skeleton'
+    14→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    15→import {
+    16→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell, TableFooter,
+    17→} from '@/components/ui/table'
+    18→import {
+    19→  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+    20→} from '@/components/ui/select'
+    21→import {
+    22→  ClipboardList, CheckCircle2, FileBarChart2, FileText, GraduationCap,
+    23→  ChevronRight, CalendarDays, Award, TrendingUp, PieChart as PieChartIcon,
+    24→  Download, Sparkles, BookOpen, Trophy, Palette, HeartHandshake, Compass,
+    25→  Activity, Percent, Hash, RefreshCw, School,
+    26→} from 'lucide-react'
+    27→import {
+    28→  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    29→  PieChart, Pie, Cell, Legend, RadarChart, PolarGrid, PolarAngleAxis,
+    30→  PolarRadiusAxis, Radar,
+    31→} from 'recharts'
+    32→import { toast } from 'sonner'
+    33→import { cn } from '@/lib/utils'
+    34→
+    35→const PIE_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#f43f5e', '#8b5cf6', '#0ea5e9', '#64748b']
+    36→
+    37→function fmtDate(iso: string): string {
+    38→  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    39→}
+    40→
+    41→function fmtRange(a: string, b: string): string {
+    42→  const d1 = new Date(a)
+    43→  const d2 = new Date(b)
+    44→  if (d1.getMonth() === d2.getMonth() && d1.getFullYear() === d2.getFullYear()) {
+    45→    return `${d1.getDate()}–${d2.getDate()} ${d1.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`
+    46→  }
+    47→  return `${fmtDate(a)} → ${fmtDate(b)}`
+    48→}
+    49→
+    50→// ============================================================
+    51→// Cell color for an obtained percentage
+    52→// ============================================================
+    53→function pctColorClass(pct: number): string {
+    54→  if (pct >= 80) return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-semibold'
+    55→  if (pct >= 60) return 'bg-amber-500/15 text-amber-700 dark:text-amber-400 font-semibold'
+    56→  if (pct < 40) return 'bg-rose-500/15 text-rose-700 dark:text-rose-400 font-semibold'
+    57→  return 'bg-muted text-foreground font-medium'
+    58→}
+    59→
+    60→// ============================================================
+    61→// Exam list item (left pane)
+    62→// ============================================================
+    63→function ExamListItem({
+    64→  exam, active, onClick,
+    65→}: {
+    66→  exam: Exam
+    67→  active: boolean
+    68→  onClick: () => void
+    69→}) {
+    70→  return (
+    71→    <button
+    72→      onClick={onClick}
+    73→      className={cn(
+    74→        'w-full text-left rounded-xl border p-4 transition-all group',
+    75→        active
+    76→          ? 'border-primary bg-primary/5 shadow-sm'
+    77→          : 'border-border hover:border-primary/40 hover:bg-accent/40',
+    78→      )}
+    79→    >
+    80→      <div className="flex items-start justify-between gap-2">
+    81→        <div className="flex items-start gap-3 min-w-0">
+    82→          <div className={cn(
+    83→            'size-10 rounded-lg grid place-items-center shrink-0 transition-colors',
+    84→            active ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary group-hover:bg-primary/15',
+    85→          )}>
+    86→            <ClipboardList className="size-5" />
+    87→          </div>
+    88→          <div className="min-w-0">
+    89→            <p className="font-semibold text-sm truncate">{exam.name}</p>
+    90→            <p className="text-[11px] text-muted-foreground mt-0.5">{fmtRange(exam.startDate, exam.endDate)}</p>
+    91→          </div>
+    92→        </div>
+    93→        {active && <ChevronRight className="size-4 text-primary shrink-0 mt-1" />}
+    94→      </div>
+    95→      <div className="flex flex-wrap items-center gap-1.5 mt-3">
+    96→        <Badge variant="outline" className="text-[10px] gap-1">
+    97→          <BookOpen className="size-3" /> {exam.examType}
+    98→        </Badge>
+    99→        <StatusBadge status={exam.status} />
+   100→        <Badge variant="secondary" className="text-[10px] gap-1 ml-auto">
+   101→          <Hash className="size-3" /> {exam.marksCount ?? 0}
+   102→        </Badge>
+   103→      </div>
+   104→    </button>
+   105→  )
+   106→}
+   107→
+   108→// ============================================================
+   109→// Marks sheet (pivot table)
+   110→// ============================================================
+   111→interface PivotRow {
+   112→  studentId: string
+   113→  studentName: string
+   114→  admissionNo: string
+   115→  className: string
+   116→  cells: Record<string, ExamMark | undefined>
+   117→  total: number
+   118→  maxTotal: number
+   119→  pct: number
+   120→}
+   121→
+   122→function MarksSheetTab({
+   123→  exam, classId,
+   124→}: {
+   125→  exam: Exam
+   126→  classId: string
+   127→}) {
+   128→  const marksQ = useQuery({
+   129→    queryKey: ['exams', 'marks', exam.id, classId],
+   130→    queryFn: () => api.exams.marks(exam.id, classId || undefined),
+   131→    enabled: !!exam.id,
+   132→  })
+   133→
+   134→  const marks = marksQ.data ?? []
+   135→
+   136→  const { subjects, rows, subjectAverages } = useMemo(() => {
+   137→    const subjectSet = new Map<string, { name: string; max: number }>()
+   138→    for (const m of marks) {
+   139→      if (!subjectSet.has(m.subject)) subjectSet.set(m.subject, { name: m.subject, max: m.maxMarks })
+   140→    }
+   141→    const subjects = Array.from(subjectSet.values()).sort((a, b) => a.name.localeCompare(b.name))
+   142→
+   143→    const byStudent = new Map<string, PivotRow>()
+   144→    for (const m of marks) {
+   145→      const existing = byStudent.get(m.studentId)
+   146→      const r: PivotRow = existing ?? {
+   147→        studentId: m.studentId,
+   148→        studentName: m.studentName,
+   149→        admissionNo: m.admissionNo,
+   150→        className: m.className || '-',
+   151→        cells: {},
+   152→        total: 0,
+   153→        maxTotal: 0,
+   154→        pct: 0,
+   155→      }
+   156→      if (!existing) byStudent.set(m.studentId, r)
+   157→      r.cells[m.subject] = m
+   158→      if (m.obtained != null) {
+   159→        r.total += m.obtained
+   160→        r.maxTotal += m.maxMarks
+   161→      }
+   162→    }
+   163→    const rows = Array.from(byStudent.values())
+   164→      .map((r) => ({ ...r, pct: r.maxTotal ? Math.round((r.total / r.maxTotal) * 100) : 0 }))
+   165→      .sort((a, b) => b.pct - a.pct || a.studentName.localeCompare(b.studentName))
+   166→
+   167→    const subjectAverages = subjects.map((s) => {
+   168→      const vals = marks.filter((m) => m.subject === s.name && m.obtained != null)
+   169→      const sum = vals.reduce((acc, m) => acc + (m.obtained ?? 0), 0)
+   170→      const pct = vals.length ? Math.round((sum / (vals.length * s.max)) * 100) : 0
+   171→      return { name: s.name, avg: vals.length ? Math.round((sum / vals.length) * 10) / 10 : 0, pct, count: vals.length }
+   172→    })
+   173→
+   174→    return { subjects, rows, subjectAverages }
+   175→  }, [marks])
+   176→
+   177→  if (marksQ.isLoading) {
+   178→    return (
+   179→      <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+   180→    )
+   181→  }
+   182→  if (marksQ.isError) {
+   183→    return <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load marks" description="Please retry." /></CardContent></Card>
+   184→  }
+   185→  if (marks.length === 0) {
+   186→    return (
+   187→      <Card><CardContent className="py-2">
+   188→        <EmptyState icon={FileBarChart2} title="No marks recorded" description="Marks for this exam & class have not been entered yet." />
+   189→      </CardContent></Card>
+   190→    )
+   191→  }
+   192→
+   193→  return (
+   194→    <Card className="overflow-hidden">
+   195→      <CardHeader className="pb-3">
+   196→        <div className="flex flex-wrap items-center justify-between gap-3">
+   197→          <div>
+   198→            <CardTitle className="text-base flex items-center gap-2"><FileBarChart2 className="size-4 text-primary" /> Marks Sheet</CardTitle>
+   199→            <CardDescription className="text-xs mt-0.5">
+   200→              {exam.name} · {rows.length} students · {subjects.length} subjects
+   201→            </CardDescription>
+   202→          </div>
+   203→          <Badge variant="secondary" className="text-[11px] gap-1">
+   204→            <Award className="size-3" /> Avg {subjectAverages.length ? Math.round(subjectAverages.reduce((a, s) => a + s.pct, 0) / subjectAverages.length) : 0}%
+   205→          </Badge>
+   206→        </div>
+   207→      </CardHeader>
+   208→      <CardContent className="px-0 pb-0">
+   209→        <div className="max-h-[60vh] overflow-auto scroll-thin border-t">
+   210→          <Table className="min-w-[700px]">
+   211→            <TableHeader className="sticky top-0 bg-card z-10">
+   212→              <TableRow>
+   213→                <TableHead className="pl-6 sticky left-0 bg-card z-20 min-w-[180px]">Student</TableHead>
+   214→                {subjects.map((s) => (
+   215→                  <TableHead key={s.name} className="text-center min-w-[90px]">
+   216→                    <div className="flex flex-col items-center">
+   217→                      <span className="text-[11px]">{s.name}</span>
+   218→                      <span className="text-[10px] text-muted-foreground tabular-nums">/{s.max}</span>
+   219→                    </div>
+   220→                  </TableHead>
+   221→                ))}
+   222→                <TableHead className="text-right pr-6 min-w-[100px]">Total</TableHead>
+   223→                <TableHead className="text-right pr-6 min-w-[80px]">%</TableHead>
+   224→              </TableRow>
+   225→            </TableHeader>
+   226→            <TableBody>
+   227→              {rows.map((r) => (
+   228→                <TableRow key={r.studentId}>
+   229→                  <TableCell className="pl-6 sticky left-0 bg-card z-10">
+   230→                    <div className="flex items-center gap-2.5 min-w-0">
+   231→                      <div className="size-7 rounded-full bg-primary/10 text-primary grid place-items-center text-[10px] font-bold shrink-0">
+   232→                        {r.studentName.split(' ').map((w) => w[0]).slice(0, 2).join('')}
+   233→                      </div>
+   234→                      <div className="min-w-0">
+   235→                        <p className="font-medium text-sm truncate">{r.studentName}</p>
+   236→                        <p className="text-[11px] text-muted-foreground tabular-nums">{r.admissionNo} · {r.className}</p>
+   237→                      </div>
+   238→                    </div>
+   239→                  </TableCell>
+   240→                  {subjects.map((s) => {
+   241→                    const cell = r.cells[s.name]
+   242→                    const obtained = cell?.obtained
+   243→                    const pct = cell && cell.maxMarks ? Math.round(((obtained ?? 0) / cell.maxMarks) * 100) : 0
+   244→                    return (
+   245→                      <TableCell key={s.name} className="text-center">
+   246→                        {cell ? (
+   247→                          <span className={cn(
+   248→                            'inline-flex items-center justify-center min-w-[44px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   249→                            obtained == null ? 'bg-muted/50 text-muted-foreground' : pctColorClass(pct),
+   250→                          )} title={cell.grade ? `Grade: ${cell.grade}` : undefined}>
+   251→                            {obtained == null ? '—' : obtained}
+   252→                          </span>
+   253→                        ) : (
+   254→                          <span className="text-muted-foreground/40 text-xs">—</span>
+   255→                        )}
+   256→                      </TableCell>
+   257→                    )
+   258→                  })}
+   259→                  <TableCell className="text-right pr-6 font-semibold tabular-nums">
+   260→                    {r.total}<span className="text-muted-foreground text-[11px] font-normal">/{r.maxTotal}</span>
+   261→                  </TableCell>
+   262→                  <TableCell className="text-right pr-6">
+   263→                    <span className={cn(
+   264→                      'inline-flex items-center justify-center min-w-[44px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   265→                      pctColorClass(r.pct),
+   266→                    )}>{r.pct}%</span>
+   267→                  </TableCell>
+   268→                </TableRow>
+   269→              ))}
+   270→            </TableBody>
+   271→            <TableFooter className="sticky bottom-0 bg-muted/40 z-10">
+   272→              <TableRow className="border-t font-semibold">
+   273→                <TableCell className="pl-6 sticky left-0 bg-muted/40 z-10">
+   274→                  <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+   275→                    <TrendingUp className="size-3.5" /> Subject Avg
+   276→                  </span>
+   277→                </TableCell>
+   278→                {subjects.map((s) => {
+   279→                  const avg = subjectAverages.find((a) => a.name === s.name)
+   280→                  const pct = avg?.pct ?? 0
+   281→                  return (
+   282→                    <TableCell key={s.name} className="text-center">
+   283→                      <span className={cn(
+   284→                        'inline-flex items-center justify-center min-w-[44px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   285→                        pctColorClass(pct),
+   286→                      )}>
+   287→                        {avg?.avg ?? 0}
+   288→                      </span>
+   289→                    </TableCell>
+   290→                  )
+   291→                })}
+   292→                <TableCell className="text-right pr-6 text-muted-foreground">—</TableCell>
+   293→                <TableCell className="text-right pr-6 text-muted-foreground">—</TableCell>
+   294→              </TableRow>
+   295→            </TableFooter>
+   296→          </Table>
+   297→        </div>
+   298→      </CardContent>
+   299→    </Card>
+   300→  )
+   301→}
+   302→
+   303→// ============================================================
+   304→// Progress card (holistic report card)
+   305→// ============================================================
+   306→const CO_SCHOLASTIC_AREAS = [
+   307→  { key: 'sports', label: 'Sports & Games', icon: Trophy },
+   308→  { key: 'arts', label: 'Art & Music', icon: Palette },
+   309→  { key: 'behavior', label: 'Behavior & Conduct', icon: HeartHandshake },
+   310→  { key: 'lifeSkills', label: 'Life Skills', icon: Compass },
+   311→] as const
+   312→
+   313→const CO_GRADES = ['A+', 'A', 'B+', 'B', 'C', 'D'] as const
+   314→
+   315→function ProgressCardTab({
+   316→  exam, classId,
+   317→}: {
+   318→  exam: Exam
+   319→  classId: string
+   320→}) {
+   321→  const marksQ = useQuery({
+   322→    queryKey: ['exams', 'marks', exam.id, classId],
+   323→    queryFn: () => api.exams.marks(exam.id, classId || undefined),
+   324→    enabled: !!exam.id,
+   325→  })
+   326→  const marks = marksQ.data ?? []
+   327→
+   328→  // Unique students from marks
+   329→  const studentsInExam = useMemo(() => {
+   330→    const map = new Map<string, { id: string; name: string; admissionNo: string; className: string }>()
+   331→    for (const m of marks) {
+   332→      if (!map.has(m.studentId)) {
+   333→        map.set(m.studentId, { id: m.studentId, name: m.studentName, admissionNo: m.admissionNo, className: m.className || '-' })
+   334→      }
+   335→    }
+   336→    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
+   337→  }, [marks])
+   338→
+   339→  // Also fetch full student records (for attendance %, gender, etc.)
+   340→  const studentsQ = useQuery({
+   341→    queryKey: ['students', 'list', 'progress', classId],
+   342→    queryFn: () => api.students.list(classId ? { classId } : {}),
+   343→    enabled: !!exam.id,
+   344→  })
+   345→  const allStudents: Student[] = studentsQ.data ?? []
+   346→
+   347→  const [studentId, setStudentId] = useState<string>('')
+   348→  const effectiveStudentId = studentId || (studentsInExam[0]?.id ?? '')
+   349→  const studentMeta = studentsInExam.find((s) => s.id === effectiveStudentId) || null
+   350→  const studentFull = allStudents.find((s) => s.id === effectiveStudentId) || null
+   351→
+   352→  // Local co-scholastic grades
+   353→  const [coGrades, setCoGrades] = useState<Record<string, string>>({
+   354→    sports: 'A', arts: 'A+', behavior: 'A+', lifeSkills: 'A',
+   355→  })
+   356→
+   357→  const studentMarks = useMemo(
+   358→    () => marks.filter((m) => m.studentId === effectiveStudentId),
+   359→    [marks, effectiveStudentId],
+   360→  )
+   361→
+   362→  const radarData = useMemo(() => {
+   363→    return studentMarks.map((m) => ({
+   364→      subject: m.subject.length > 8 ? m.subject.slice(0, 8) + '…' : m.subject,
+   365→      score: m.maxMarks ? Math.round(((m.obtained ?? 0) / m.maxMarks) * 100) : 0,
+   366→      fullMark: 100,
+   367→    }))
+   368→  }, [studentMarks])
+   369→
+   370→  const totalObtained = studentMarks.reduce((acc, m) => acc + (m.obtained ?? 0), 0)
+   371→  const totalMax = studentMarks.reduce((acc, m) => acc + m.maxMarks, 0)
+   372→  const overallPct = totalMax ? Math.round((totalObtained / totalMax) * 100) : 0
+   373→  const overallGrade = overallPct >= 90 ? 'A+' : overallPct >= 80 ? 'A' : overallPct >= 70 ? 'B+' : overallPct >= 60 ? 'B' : overallPct >= 50 ? 'C' : overallPct >= 40 ? 'D' : 'F'
+   374→
+   375→  const attendancePct = studentFull?.attendancePercent ?? 0
+   376→
+   377→  if (marksQ.isLoading) {
+   378→    return <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+   379→  }
+   380→  if (studentsInExam.length === 0) {
+   381→    return (
+   382→      <Card><CardContent className="py-2">
+   383→        <EmptyState icon={FileText} title="No marks recorded" description="Generate marks for this exam to view progress cards." />
+   384→      </CardContent></Card>
+   385→    )
+   386→  }
+   387→
+   388→  return (
+   389→    <div className="space-y-4">
+   390→      {/* Student selector */}
+   391→      <Card className="p-3">
+   392→        <div className="flex flex-wrap items-center justify-between gap-3">
+   393→          <div className="flex items-center gap-2">
+   394→            <FileText className="size-4 text-primary" />
+   395→            <span className="text-sm font-medium">Select Student</span>
+   396→          </div>
+   397→          <Select value={effectiveStudentId} onValueChange={setStudentId}>
+   398→            <SelectTrigger size="sm" className="min-w-[260px]">
+   399→              <SelectValue placeholder="Choose a student" />
+   400→            </SelectTrigger>
+   401→            <SelectContent>
+   402→              {studentsInExam.map((s) => (
+   403→                <SelectItem key={s.id} value={s.id}>
+   404→                  {s.name} · {s.admissionNo}
+   405→                </SelectItem>
+   406→              ))}
+   407→            </SelectContent>
+   408→          </Select>
+   409→        </div>
+   410→      </Card>
+   411→
+   412→      {/* Printable progress card */}
+   413→      <Card className="overflow-hidden border-primary/20">
+   414→        {/* School header */}
+   415→        <div className="bg-gradient-to-br from-primary to-emerald-600 text-primary-foreground p-6">
+   416→          <div className="flex flex-wrap items-center justify-between gap-4">
+   417→            <div className="flex items-center gap-3">
+   418→              <div className="size-12 rounded-xl bg-primary-foreground/15 grid place-items-center">
+   419→                <School className="size-6" />
+   420→              </div>
+   421→              <div>
+   422→                <h3 className="text-lg font-bold leading-tight">Vidyamatrix International School</h3>
+   423→                <p className="text-xs opacity-90">Holistic Progress Card · Academic Year 2026–27</p>
+   424→              </div>
+   425→            </div>
+   426→            <div className="text-right">
+   427→              <p className="text-xs opacity-80 uppercase tracking-wide">Examination</p>
+   428→              <p className="font-semibold text-sm">{exam.name}</p>
+   429→              <p className="text-[11px] opacity-80">{fmtRange(exam.startDate, exam.endDate)}</p>
+   430→            </div>
+   431→          </div>
+   432→        </div>
+   433→
+   434→        {/* Student info */}
+   435→        <div className="px-6 py-4 border-b bg-muted/20 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+   436→          <div>
+   437→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Student</p>
+   438→            <p className="font-semibold">{studentMeta?.name ?? '-'}</p>
+   439→          </div>
+   440→          <div>
+   441→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Admission No.</p>
+   442→            <p className="font-semibold tabular-nums">{studentMeta?.admissionNo ?? '-'}</p>
+   443→          </div>
+   444→          <div>
+   445→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Class</p>
+   446→            <p className="font-semibold">{studentMeta?.className ?? studentFull?.className ?? '-'}</p>
+   447→          </div>
+   448→          <div>
+   449→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Section</p>
+   450→            <p className="font-semibold">{studentFull?.sectionName ?? '-'}</p>
+   451→          </div>
+   452→        </div>
+   453→
+   454→        <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
+   455→          {/* Academic marks table */}
+   456→          <div className="lg:col-span-2 p-6 border-b lg:border-b-0 lg:border-r">
+   457→            <div className="flex items-center gap-2 mb-3">
+   458→              <BookOpen className="size-4 text-primary" />
+   459→              <h4 className="text-sm font-semibold">Scholastic Area</h4>
+   460→              <Badge variant="secondary" className="text-[10px] ml-auto">{studentMarks.length} subjects</Badge>
+   461→            </div>
+   462→            <Table>
+   463→              <TableHeader>
+   464→                <TableRow>
+   465→                  <TableHead className="pl-0">Subject</TableHead>
+   466→                  <TableHead className="text-center">Max</TableHead>
+   467→                  <TableHead className="text-center">Obtained</TableHead>
+   468→                  <TableHead className="text-center">%</TableHead>
+   469→                  <TableHead className="text-right pr-0">Grade</TableHead>
+   470→                </TableRow>
+   471→              </TableHeader>
+   472→              <TableBody>
+   473→                {studentMarks.map((m) => {
+   474→                  const pct = m.maxMarks ? Math.round(((m.obtained ?? 0) / m.maxMarks) * 100) : 0
+   475→                  return (
+   476→                    <TableRow key={m.id}>
+   477→                      <TableCell className="pl-0 font-medium text-sm">{m.subject}</TableCell>
+   478→                      <TableCell className="text-center text-xs tabular-nums text-muted-foreground">{m.maxMarks}</TableCell>
+   479→                      <TableCell className="text-center text-sm tabular-nums">{m.obtained ?? '—'}</TableCell>
+   480→                      <TableCell className="text-center">
+   481→                        <span className={cn(
+   482→                          'inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   483→                          pctColorClass(pct),
+   484→                        )}>{pct}%</span>
+   485→                      </TableCell>
+   486→                      <TableCell className="text-right pr-0">
+   487→                        <Badge variant="outline" className="text-[11px] tabular-nums">{m.grade ?? '-'}</Badge>
+   488→                      </TableCell>
+   489→                    </TableRow>
+   490→                  )
+   491→                })}
+   492→              </TableBody>
+   493→              <TableFooter>
+   494→                <TableRow>
+   495→                  <TableCell className="pl-0 font-semibold text-sm" colSpan={2}>Total</TableCell>
+   496→                  <TableCell className="text-center font-semibold tabular-nums text-sm">{totalObtained}/{totalMax}</TableCell>
+   497→                  <TableCell className="text-center">
+   498→                    <span className={cn(
+   499→                      'inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   500→                      pctColorClass(overallPct),
+   501→                    )}>{overallPct}%</span>
+   502→                  </TableCell>
+   503→                  <TableCell className="text-right pr-0">
+   504→                    <Badge className="text-[11px] tabular-nums">{overallGrade}</Badge>
+   505→                  </TableCell>
+   506→                </TableRow>
+   507→              </TableFooter>
+   508→            </Table>
+   509→          </div>
+   510→
+   511→          {/* Radar chart */}
+   512→          <div className="p-6">
+   513→            <div className="flex items-center gap-2 mb-3">
+   514→              <Activity className="size-4 text-primary" />
+   515→              <h4 className="text-sm font-semibold">Subject Performance</h4>
+   516→            </div>
+   517→            {radarData.length === 0 ? (
+   518→              <EmptyState icon={Activity} title="No data" />
+   519→            ) : (
+   520→              <ResponsiveContainer width="100%" height={240}>
+   521→                <RadarChart data={radarData} outerRadius="75%">
+   522→                  <PolarGrid stroke="var(--border)" />
+   523→                  <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} />
+   524→                  <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }} />
+   525→                  <Radar name="Score" dataKey="score" stroke="#10b981" fill="#10b981" fillOpacity={0.35} strokeWidth={2} />
+   526→                  <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v: any) => `${v}%`} />
+   527→                </RadarChart>
+   528→              </ResponsiveContainer>
+   529→            )}
+   530→            <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+   531→              <div className="rounded-lg border p-2">
+   532→                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Attendance</p>
+   533→                <p className="font-bold text-lg tabular-nums">{attendancePct}%</p>
+   534→              </div>
+   535→              <div className="rounded-lg border p-2">
+   536→                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Overall</p>
+   537→                <p className="font-bold text-lg tabular-nums">{overallPct}%</p>
+   538→              </div>
+   539→            </div>
+   540→          </div>
+   541→        </div>
+   542→
+   543→        {/* Co-scholastic */}
+   544→        <div className="p-6 border-t bg-muted/10">
+   545→          <div className="flex items-center gap-2 mb-3">
+   546→            <Sparkles className="size-4 text-primary" />
+   547→            <h4 className="text-sm font-semibold">Co-scholastic Area</h4>
+   548→            <span className="text-[11px] text-muted-foreground ml-auto">Graded on a 5-point scale (A+ to D)</span>
+   549→          </div>
+   550→          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+   551→            {CO_SCHOLASTIC_AREAS.map((area) => {
+   552→              const Icon = area.icon
+   553→              return (
+   554→                <div key={area.key} className="rounded-lg border p-3 bg-card">
+   555→                  <div className="flex items-center gap-2 mb-2">
+   556→                    <div className="size-7 rounded-lg bg-primary/10 text-primary grid place-items-center">
+   557→                      <Icon className="size-4" />
+   558→                    </div>
+   559→                    <span className="text-xs font-medium">{area.label}</span>
+   560→                  </div>
+   561→                  <Select
+   562→                    value={coGrades[area.key]}
+   563→                    onValueChange={(v) => setCoGrades((prev) => ({ ...prev, [area.key]: v }))}
+   564→                  >
+   565→                    <SelectTrigger size="sm" className="w-full">
+   566→                      <SelectValue />
+   567→                    </SelectTrigger>
+   568→                    <SelectContent>
+   569→                      {CO_GRADES.map((g) => (
+   570→                        <SelectItem key={g} value={g}>{g}</SelectItem>
+   571→                      ))}
+   572→                    </SelectContent>
+   573→                  </Select>
+   574→                </div>
+   575→              )
+   576→            })}
+   577→          </div>
+   578→        </div>
+   579→
+   580→        {/* Footer */}
+   581→        <div className="p-6 border-t bg-card flex flex-wrap items-center justify-between gap-3">
+   582→          <div className="text-[11px] text-muted-foreground">
+   583→            <p>This is a system-generated progress card based on examination data.</p>
+   584→            <p className="mt-0.5">Generated on {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.</p>
+   585→          </div>
+   586→          <Button
+   587→            size="sm"
+   588→            onClick={() => toast.success('Generating PDF…', {
+   589→              description: `Progress card for ${studentMeta?.name ?? 'student'} is being prepared.`,
+   590→            })}
+   591→          >
+   592→            <Download className="size-4" /> Download PDF
+   593→          </Button>
+   594→        </div>
+   595→      </Card>
+   596→    </div>
+   597→  )
+   598→}
+   599→
+   600→// ============================================================
+   601→// Analysis tab
+   602→// ============================================================
+   603→function AnalysisTab({
+   604→  exam, classId,
+   605→}: {
+   606→  exam: Exam
+   607→  classId: string
+   608→}) {
+   609→  const marksQ = useQuery({
+   610→    queryKey: ['exams', 'marks', exam.id, classId],
+   611→    queryFn: () => api.exams.marks(exam.id, classId || undefined),
+   612→    enabled: !!exam.id,
+   613→  })
+   614→  const marks = marksQ.data ?? []
+   615→
+   616→  const { subjectAverages, gradeDist } = useMemo(() => {
+   617→    // Subject averages
+   618→    const bySubject = new Map<string, { sum: number; count: number; max: number }>()
+   619→    for (const m of marks) {
+   620→      if (m.obtained == null) continue
+   621→      const e = bySubject.get(m.subject) || { sum: 0, count: 0, max: m.maxMarks }
+   622→      e.sum += m.obtained
+   623→      e.count += 1
+   624→      e.max = m.maxMarks
+   625→      bySubject.set(m.subject, e)
+   626→    }
+   627→    const subjectAverages = Array.from(bySubject.entries())
+   628→      .map(([name, v]) => ({
+   629→        subject: name,
+   630→        average: v.count ? Math.round((v.sum / v.count) * 10) / 10 : 0,
+   631→        pct: v.count ? Math.round((v.sum / (v.count * v.max)) * 100) : 0,
+   632→      }))
+   633→      .sort((a, b) => b.pct - a.pct)
+   634→
+   635→    // Grade distribution
+   636→    const gradeOrder = ['A+', 'A', 'B+', 'B', 'C', 'D', 'F']
+   637→    const counts = new Map<string, number>(gradeOrder.map((g) => [g, 0]))
+   638→    for (const m of marks) {
+   639→      const g = (m.grade || 'N/A').trim()
+   640→      if (counts.has(g)) counts.set(g, (counts.get(g) ?? 0) + 1)
+   641→    }
+   642→    const gradeDist = gradeOrder
+   643→      .map((g) => ({ label: g, value: counts.get(g) ?? 0 }))
+   644→      .filter((x) => x.value > 0)
+   645→
+   646→    return { subjectAverages, gradeDist }
+   647→  }, [marks])
+   648→
+   649→  if (marksQ.isLoading) {
+   650→    return <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+   651→  }
+   652→  if (marksQ.isError) {
+   653→    return <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load analysis" description="Please retry." /></CardContent></Card>
+   654→  }
+   655→  if (marks.length === 0) {
+   656→    return (
+   657→      <Card><CardContent className="py-2">
+   658→        <EmptyState icon={PieChartIcon} title="No data for analysis" description="Enter marks for this exam to enable analytics." />
+   659→      </CardContent></Card>
+   660→    )
+   661→  }
+   662→
+   663→  const totalMarks = marks.length
+   664→  const passedCount = marks.filter((m) => (m.obtained ?? 0) / m.maxMarks >= 0.4).length
+   665→  const passRate = totalMarks ? Math.round((passedCount / totalMarks) * 100) : 0
+   666→  const classAvg = subjectAverages.length
+   667→    ? Math.round(subjectAverages.reduce((a, s) => a + s.pct, 0) / subjectAverages.length)
+   668→    : 0
+   669→
+   670→  return (
+   671→    <div className="space-y-4">
+   672→      {/* Summary strip */}
+   673→      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+   674→        <Card className="p-3">
+   675→          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total Entries</p>
+   676→          <p className="text-xl font-bold tabular-nums">{totalMarks}</p>
+   677→        </Card>
+   678→        <Card className="p-3">
+   679→          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Subjects</p>
+   680→          <p className="text-xl font-bold tabular-nums">{subjectAverages.length}</p>
+   681→        </Card>
+   682→        <Card className="p-3">
+   683→          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Class Average</p>
+   684→          <p className="text-xl font-bold tabular-nums">{classAvg}%</p>
+   685→        </Card>
+   686→        <Card className="p-3">
+   687→          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pass Rate</p>
+   688→          <p className="text-xl font-bold tabular-nums text-emerald-600">{passRate}%</p>
+   689→        </Card>
+   690→      </div>
+   691→
+   692→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   693→        {/* Subject averages bar */}
+   694→        <Card>
+   695→          <CardHeader className="pb-2">
+   696→            <CardTitle className="text-sm font-medium flex items-center gap-2">
+   697→              <TrendingUp className="size-4 text-primary" /> Subject-wise Class Averages
+   698→            </CardTitle>
+   699→          </CardHeader>
+   700→          <CardContent>
+   701→            <ResponsiveContainer width="100%" height={300}>
+   702→              <BarChart data={subjectAverages} margin={{ left: -10, right: 8, top: 8 }}>
+   703→                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+   704→                <XAxis dataKey="subject" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" interval={0} angle={-15} textAnchor="end" height={50} />
+   705→                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" unit="%" />
+   706→                <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v: any) => `${v}%`} />
+   707→                <Bar dataKey="pct" fill="#10b981" radius={[4, 4, 0, 0]} name="Average %" />
+   708→              </BarChart>
+   709→            </ResponsiveContainer>
+   710→          </CardContent>
+   711→        </Card>
+   712→
+   713→        {/* Grade distribution pie */}
+   714→        <Card>
+   715→          <CardHeader className="pb-2">
+   716→            <CardTitle className="text-sm font-medium flex items-center gap-2">
+   717→              <PieChartIcon className="size-4 text-primary" /> Grade Distribution
+   718→            </CardTitle>
+   719→          </CardHeader>
+   720→          <CardContent>
+   721→            <ResponsiveContainer width="100%" height={300}>
+   722→              <PieChart>
+   723→                <Pie data={gradeDist} dataKey="value" nameKey="label" cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={3}>
+   724→                  {gradeDist.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+   725→                </Pie>
+   726→                <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+   727→                <Legend wrapperStyle={{ fontSize: 12 }} />
+   728→              </PieChart>
+   729→            </ResponsiveContainer>
+   730→          </CardContent>
+   731→        </Card>
+   732→      </div>
+   733→    </div>
+   734→  )
+   735→}
+   736→
+   737→// ============================================================
+   738→// Main module
+   739→// ============================================================
+   740→export function ExamsModule() {
+   741→  const examsQ = useQuery({ queryKey: ['exams', 'list'], queryFn: api.exams.list })
+   742→  const classesQ = useQuery({ queryKey: ['academics', 'classes'], queryFn: api.academics.classes })
+   743→
+   744→  const exams = examsQ.data ?? []
+   745→  const classes = classesQ.data ?? []
+   746→
+   747→  const [selectedId, setSelectedId] = useState<string>('')
+   748→  const effectiveSelectedId = selectedId || (exams[0]?.id ?? '')
+   749→  const selectedExam = exams.find((e) => e.id === effectiveSelectedId) || null
+   750→
+   751→  const [classId, setClassId] = useState<string>('')
+   752→  const effectiveClassId = classId || (classes[0]?.id ?? '')
+   753→
+   754→  // Total stats
+   755→  const totalExams = exams.length
+   756→  const completedExams = exams.filter((e) => e.status === 'Completed').length
+   757→  const totalMarksEntered = exams.reduce((acc, e) => acc + (e.marksCount ?? 0), 0)
+   758→
+   759→  return (
+   760→    <div className="space-y-6">
+   761→      <SectionHeader
+   762→        title="Examinations & Results"
+   763→        description="Manage exam schedules, enter marks, generate holistic progress cards, and analyse performance."
+   764→      />
+   765→
+   766→      {/* Stat cards */}
+   767→      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+   768→        <StatCard
+   769→          label="Total Exams"
+   770→          value={totalExams}
+   771→          sub="Across all academic years"
+   772→          icon={ClipboardList}
+   773→          accent="primary"
+   774→          loading={examsQ.isLoading}
+   775→        />
+   776→        <StatCard
+   777→          label="Completed Exams"
+   778→          value={completedExams}
+   779→          sub="Results published"
+   780→          icon={CheckCircle2}
+   781→          accent="emerald"
+   782→          loading={examsQ.isLoading}
+   783→        />
+   784→        <StatCard
+   785→          label="Marks Entered"
+   786→          value={totalMarksEntered}
+   787→          sub="Across all exams"
+   788→          icon={FileBarChart2}
+   789→          accent="violet"
+   790→          loading={examsQ.isLoading}
+   791→        />
+   792→      </div>
+   793→
+   794→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+   795→        {/* Left: exams list */}
+   796→        <div className="lg:col-span-1 space-y-3">
+   797→          <div className="flex items-center justify-between gap-2">
+   798→            <h3 className="text-sm font-semibold flex items-center gap-2"><ClipboardList className="size-4 text-primary" /> Examinations</h3>
+   799→            <Badge variant="secondary" className="text-[11px]">{exams.length}</Badge>
+   800→          </div>
+   801→
+   802→          {examsQ.isLoading ? (
+   803→            <div className="space-y-2 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+   804→              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
+   805→            </div>
+   806→          ) : examsQ.isError ? (
+   807→            <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load exams" description="Please retry." /></CardContent></Card>
+   808→          ) : exams.length === 0 ? (
+   809→            <Card><CardContent className="py-2"><EmptyState icon={ClipboardList} title="No exams scheduled" description="Create exams in the academic setup to view them here." /></CardContent></Card>
+   810→          ) : (
+   811→            <div className="space-y-2 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+   812→              {exams.map((e) => (
+   813→                <ExamListItem
+   814→                  key={e.id}
+   815→                  exam={e}
+   816→                  active={effectiveSelectedId === e.id}
+   817→                  onClick={() => setSelectedId(e.id)}
+   818→                />
+   819→              ))}
+   820→            </div>
+   821→          )}
+   822→        </div>
+   823→
+   824→        {/* Right: detail pane */}
+   825→        <div className="lg:col-span-2">
+   826→          {!selectedExam ? (
+   827→            <Card className="h-full grid place-items-center">
+   828→              <CardContent className="py-2">
+   829→                <EmptyState icon={ClipboardList} title="Select an exam" description="Pick an exam from the left to view marks, progress cards, and analysis." />
+   830→              </CardContent>
+   831→            </Card>
+   832→          ) : (
+   833→            <div className="space-y-4">
+   834→              {/* Exam header + class selector */}
+   835→              <Card className="p-4 bg-gradient-to-br from-primary/5 to-transparent border-primary/20">
+   836→                <div className="flex flex-wrap items-center justify-between gap-3">
+   837→                  <div className="flex items-center gap-3">
+   838→                    <div className="size-11 rounded-xl bg-primary text-primary-foreground grid place-items-center">
+   839→                      <ClipboardList className="size-6" />
+   840→                    </div>
+   841→                    <div>
+   842→                      <p className="font-semibold text-base">{selectedExam.name}</p>
+   843→                      <p className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+   844→                        <CalendarDays className="size-3" /> {fmtRange(selectedExam.startDate, selectedExam.endDate)}
+   845→                      </p>
+   846→                    </div>
+   847→                  </div>
+   848→                  <div className="flex items-center gap-2">
+   849→                    <Badge variant="outline" className="gap-1 text-[11px]"><BookOpen className="size-3" /> {selectedExam.examType}</Badge>
+   850→                    <StatusBadge status={selectedExam.status} />
+   851→                    <Badge variant="secondary" className="text-[11px] gap-1"><Hash className="size-3" /> {selectedExam.marksCount ?? 0}</Badge>
+   852→                  </div>
+   853→                </div>
+   854→                <div className="flex items-center gap-2 mt-3 pt-3 border-t">
+   855→                  <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+   856→                    <GraduationCap className="size-3.5" /> Class
+   857→                  </span>
+   858→                  <Select value={effectiveClassId} onValueChange={setClassId}>
+   859→                    <SelectTrigger size="sm" className="w-44">
+   860→                      <SelectValue placeholder="All classes" />
+   861→                    </SelectTrigger>
+   862→                    <SelectContent>
+   863→                      {classes.map((c) => (
+   864→                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+   865→                      ))}
+   866→                    </SelectContent>
+   867→                  </Select>
+   868→                </div>
+   869→              </Card>
+   870→
+   871→              <Tabs defaultValue="marks">
+   872→                <TabsList>
+   873→                  <TabsTrigger value="marks" className="gap-1.5"><FileBarChart2 className="size-4" /> Marks Sheet</TabsTrigger>
+   874→                  <TabsTrigger value="progress" className="gap-1.5"><FileText className="size-4" /> Progress Card</TabsTrigger>
+   875→                  <TabsTrigger value="analysis" className="gap-1.5"><Percent className="size-4" /> Analysis</TabsTrigger>
+   876→                </TabsList>
+   877→
+   878→                <TabsContent value="marks" className="mt-4">
+   879→                  <MarksSheetTab exam={selectedExam} classId={effectiveClassId} />
+   880→                </TabsContent>
+   881→
+   882→                <TabsContent value="progress" className="mt-4">
+   883→                  <ProgressCardTab exam={selectedExam} classId={effectiveClassId} />
+   884→                </TabsContent>
+   885→
+   886→                <TabsContent value="analysis" className="mt-4">
+   887→                  <AnalysisTab exam={selectedExam} classId={effectiveClassId} />
+   888→                </TabsContent>
+   889→              </Tabs>
+   890→            </div>
+   891→          )}
+   892→        </div>
+   893→      </div>
+   894→    </div>
+   895→  )
+   896→}
+   897→

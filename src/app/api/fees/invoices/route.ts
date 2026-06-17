@@ -1,23 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getCurrentUser } from '@/lib/auth'
+import { can } from '@/lib/rbac'
 
 export async function GET(req: NextRequest) {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!can(user.role, 'fees', 'view')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const { searchParams } = new URL(req.url)
   const status = searchParams.get('status') || undefined
   const q = searchParams.get('q') || ''
 
+  // Role scoping
+  let scopeWhere: any = {}
+  if (user.role === 'student') {
+    scopeWhere = { studentId: user.studentId || '__none__' }
+  } else if (user.role === 'parent') {
+    scopeWhere = { studentId: { in: user.childrenStudentIds.length ? user.childrenStudentIds : ['__none__'] } }
+  } else if (user.role === 'teacher') {
+    scopeWhere = { student: { classId: { in: user.teacherClassIds.length ? user.teacherClassIds : ['__none__'] } } }
+  }
+
   const invoices = await db.feeInvoice.findMany({
     where: {
       AND: [
+        scopeWhere,
         status ? { status } : {},
-        q ? {
-          OR: [
-            { invoiceNo: { contains: q } },
-            { student: { firstName: { contains: q } } },
-            { student: { lastName: { contains: q } } },
-            { student: { admissionNo: { contains: q } } },
-          ]
-        } : {},
+        q ? { OR: [{ invoiceNo: { contains: q } }, { student: { firstName: { contains: q } } }, { student: { lastName: { contains: q } } }, { student: { admissionNo: { contains: q } } }] } : {},
       ],
     },
     include: { student: { include: { class: true } }, feeStructure: true },

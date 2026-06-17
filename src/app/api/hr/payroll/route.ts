@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { requirePerm } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
+  const guard = await requirePerm('hr', 'view')
+  if (!guard.ok) return guard.res
   const { searchParams } = new URL(req.url)
   const month = searchParams.get('month') || new Date().toISOString().slice(0,7)
   const list = await db.payroll.findMany({ where: { month }, include: { employee: true }, orderBy: { employee: { empCode: 'asc' } } })

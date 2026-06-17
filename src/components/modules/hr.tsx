@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { Employee, LeaveRequest, Payroll } from '@/lib/types'
+import { useCan } from '@/lib/store'
 import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
 import {
   Card, CardContent, CardHeader, CardTitle,
@@ -26,6 +27,7 @@ import {
 import {
   Users, CalendarOff, CalendarClock, Wallet, Search, UserCheck, BadgeCheck,
   ShieldCheck, Crown, Ban, FileText, PlayCircle, IndianRupee, Mail, Phone, MapPin,
+  ShieldAlert,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -180,6 +182,7 @@ function EmployeeDialog({ employee, open, onOpenChange }: { employee: Employee |
 // ============ Leave Requests Tab ============
 function LeavesTab({ leaves }: { leaves: LeaveRequest[] }) {
   const qc = useQueryClient()
+  const canApprove = useCan()('hr', 'approve')
   const [q, setQ] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
 
@@ -263,17 +266,21 @@ function LeavesTab({ leaves }: { leaves: LeaveRequest[] }) {
                       <TableCell><StatusBadge status={l.status} /></TableCell>
                       <TableCell className="text-right">
                         {pending ? (
-                          <div className="flex justify-end gap-1.5">
-                            <Button size="sm" variant="outline" className="h-8 gap-1 px-2" disabled={approveMut.isPending} onClick={() => approveMut.mutate({ id: l.id, status: 'HODApproved' })} title="HOD Approve">
-                              <ShieldCheck className="size-3.5" /> <span className="hidden xl:inline">HOD</span>
-                            </Button>
-                            <Button size="sm" variant="default" className="h-8 gap-1 px-2" disabled={approveMut.isPending} onClick={() => approveMut.mutate({ id: l.id, status: 'PrincipalApproved' })} title="Principal Approve">
-                              <Crown className="size-3.5" /> <span className="hidden xl:inline">Principal</span>
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10" disabled={approveMut.isPending} onClick={() => approveMut.mutate({ id: l.id, status: 'Rejected' })} title="Reject">
-                              <Ban className="size-3.5" />
-                            </Button>
-                          </div>
+                          canApprove ? (
+                            <div className="flex justify-end gap-1.5">
+                              <Button size="sm" variant="outline" className="h-8 gap-1 px-2" disabled={approveMut.isPending} onClick={() => approveMut.mutate({ id: l.id, status: 'HODApproved' })} title="HOD Approve">
+                                <ShieldCheck className="size-3.5" /> <span className="hidden xl:inline">HOD</span>
+                              </Button>
+                              <Button size="sm" variant="default" className="h-8 gap-1 px-2" disabled={approveMut.isPending} onClick={() => approveMut.mutate({ id: l.id, status: 'PrincipalApproved' })} title="Principal Approve">
+                                <Crown className="size-3.5" /> <span className="hidden xl:inline">Principal</span>
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10" disabled={approveMut.isPending} onClick={() => approveMut.mutate({ id: l.id, status: 'Rejected' })} title="Reject">
+                                <Ban className="size-3.5" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">View only</span>
+                          )
                         ) : (
                           <span className="text-xs text-muted-foreground">Resolved</span>
                         )}
@@ -293,6 +300,7 @@ function LeavesTab({ leaves }: { leaves: LeaveRequest[] }) {
 // ============ Payroll Tab ============
 function PayrollTab() {
   const qc = useQueryClient()
+  const canRun = useCan()('hr', 'run')
   const currentMonth = new Date().toISOString().slice(0, 7)
   const [month, setMonth] = useState(currentMonth)
 
@@ -328,10 +336,12 @@ function PayrollTab() {
             <div className="space-y-1">
               <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-full sm:w-44" />
             </div>
-            <Button onClick={() => runMut.mutate(month)} disabled={runMut.isPending} className="gap-1.5">
-              {runMut.isPending ? <PlayCircle className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
-              Run Payroll
-            </Button>
+            {canRun && (
+              <Button onClick={() => runMut.mutate(month)} disabled={runMut.isPending} className="gap-1.5">
+                {runMut.isPending ? <PlayCircle className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+                Run Payroll
+              </Button>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -402,10 +412,47 @@ function PayrollTab() {
 
 // ============ Main module ============
 export function HrModule() {
-  const { data: employees, isLoading: empLoading } = useQuery({ queryKey: ['hr', 'employees'], queryFn: api.hr.employees })
-  const { data: leaves, isLoading: leavesLoading } = useQuery({ queryKey: ['hr', 'leaves'], queryFn: api.hr.leaves })
+  // Defensive guard: the sidebar hides HR from non-admin roles and the
+  // backend returns 403, but if a user navigates directly we render an
+  // Access Denied state instead of attempting to load data.
+  const canView = useCan()('hr', 'view')
+
+  const { data: employees, isLoading: empLoading } = useQuery({
+    queryKey: ['hr', 'employees'],
+    queryFn: api.hr.employees,
+    enabled: canView,
+  })
+  const { data: leaves, isLoading: leavesLoading } = useQuery({
+    queryKey: ['hr', 'leaves'],
+    queryFn: api.hr.leaves,
+    enabled: canView,
+  })
   const currentMonth = new Date().toISOString().slice(0, 7)
-  const { data: payroll, isLoading: payLoading } = useQuery({ queryKey: ['hr', 'payroll', currentMonth], queryFn: () => api.hr.payroll(currentMonth) })
+  const { data: payroll, isLoading: payLoading } = useQuery({
+    queryKey: ['hr', 'payroll', currentMonth],
+    queryFn: () => api.hr.payroll(currentMonth),
+    enabled: canView,
+  })
+
+  if (!canView) {
+    return (
+      <div className="space-y-6">
+        <SectionHeader
+          title="HR & Payroll"
+          description="Manage staff records, leave approvals and monthly payroll."
+        />
+        <Card>
+          <CardContent className="py-2">
+            <EmptyState
+              icon={ShieldAlert}
+              title="Access Denied"
+              description="You do not have permission to view the HR & Payroll module. Please contact an administrator if you believe this is an error."
+            />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   const totalEmployees = employees?.length ?? 0
   const today = new Date().toISOString().slice(0, 10)

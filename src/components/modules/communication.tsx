@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { Notification } from '@/lib/types'
+import { useCan } from '@/lib/store'
 import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
 import {
   Card, CardContent, CardHeader, CardTitle,
@@ -51,6 +52,7 @@ function channelAccent(channel: string) {
 // ============ Compose Card ============
 function ComposeCard() {
   const qc = useQueryClient()
+  const canSend = useCan()('communication', 'send')
   const [channel, setChannel] = useState<(typeof CHANNELS)[number]['key']>('SMS')
   const [recipient, setRecipient] = useState('')
   const [subject, setSubject] = useState('')
@@ -188,14 +190,23 @@ function ComposeCard() {
           </Select>
         </div>
 
-        <Button
-          className="w-full gap-1.5"
-          disabled={!valid || sendMut.isPending}
-          onClick={() => sendMut.mutate({ channel, recipient, subject: isEmail ? subject : undefined, message, category })}
-        >
-          {sendMut.isPending ? <RefreshCw className="size-4 animate-spin" /> : <Send className="size-4" />}
-          Send {channel}
-        </Button>
+        {canSend ? (
+          <Button
+            className="w-full gap-1.5"
+            disabled={!valid || sendMut.isPending}
+            onClick={() => sendMut.mutate({ channel, recipient, subject: isEmail ? subject : undefined, message, category })}
+          >
+            {sendMut.isPending ? <RefreshCw className="size-4 animate-spin" /> : <Send className="size-4" />}
+            Send {channel}
+          </Button>
+        ) : (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-center">
+            <p className="text-[11px] text-muted-foreground flex items-center justify-center gap-1.5">
+              <AlertTriangle className="size-3.5 text-amber-500" />
+              Sending is restricted to staff. You can still draft messages and use AI Compose.
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

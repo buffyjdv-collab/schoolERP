@@ -2,7 +2,7 @@
 
 import { useStore } from '@/lib/store'
 import { useTheme } from 'next-themes'
-import { Bell, Moon, Search, Sun, Sparkles, Menu, ChevronDown } from 'lucide-react'
+import { Bell, Moon, Search, Sun, Sparkles, ChevronDown, LogOut, Shield, GraduationCap, User, Users, School } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -12,6 +12,19 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useState, useEffect } from 'react'
+import { ROLE_LABELS } from '@/lib/rbac'
+import type { Role } from '@/lib/rbac'
+
+const ROLE_ICONS: Record<Role, any> = {
+  super_admin: Shield, admin: School, teacher: GraduationCap, student: User, parent: Users,
+}
+const ROLE_COLORS: Record<Role, string> = {
+  super_admin: 'bg-violet-500/15 text-violet-700 dark:text-violet-300',
+  admin: 'bg-primary/15 text-primary',
+  teacher: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
+  student: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+  parent: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+}
 
 const moduleTitles: Record<string, string> = {
   dashboard: 'Dashboard & MIS',
@@ -33,6 +46,7 @@ const moduleTitles: Record<string, string> = {
 export function Topbar() {
   const { activeModule, setSearchQuery, setAiAssistantOpen } = useStore()
   const { theme, setTheme } = useTheme()
+  const { user, logout, setUser } = useStore()
   const [mounted, setMounted] = useState(false)
   const [now, setNow] = useState<string>('')
 
@@ -47,6 +61,17 @@ export function Topbar() {
     return () => clearInterval(t)
   }, [])
 
+  const initials = user?.name?.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?'
+  const RoleIcon = user ? ROLE_ICONS[user.role] : User
+
+  const switchUser = async (email: string, password: string) => {
+    try {
+      const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) })
+      const data = await res.json()
+      if (res.ok) { setUser(data); window.location.reload() }
+    } catch {}
+  }
+
   return (
     <header className="h-16 border-b bg-background/80 backdrop-blur-sm flex items-center gap-3 px-4 lg:px-6 shrink-0 z-20">
       <div className="min-w-0">
@@ -57,12 +82,20 @@ export function Topbar() {
       <div className="relative hidden md:flex items-center ml-4 flex-1 max-w-md">
         <Search className="absolute left-3 size-4 text-muted-foreground pointer-events-none" />
         <Input
-          placeholder="Search students, staff, invoices…"
+          placeholder={user?.role === 'student' ? 'Search your records…' : user?.role === 'parent' ? "Search your children's records…" : 'Search students, staff, invoices…'}
           className="pl-9 h-9 bg-muted/50 border-transparent focus-visible:border-border"
           onChange={(e) => setSearchQuery(e.target.value)}
         />
         <kbd className="absolute right-2 text-[10px] text-muted-foreground border rounded px-1.5 py-0.5 hidden lg:block">⌘K</kbd>
       </div>
+
+      {/* Role badge */}
+      {user && (
+        <Badge className={`hidden sm:inline-flex gap-1 h-7 ${ROLE_COLORS[user.role]}`} variant="secondary">
+          <RoleIcon className="size-3" />
+          {ROLE_LABELS[user.role]}
+        </Badge>
+      )}
 
       <div className="ml-auto flex items-center gap-1.5">
         <Button
@@ -116,23 +149,44 @@ export function Topbar() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="gap-2 h-9 px-1.5 hover:bg-muted">
               <Avatar className="size-7">
-                <AvatarFallback className="bg-primary text-primary-foreground text-xs">AD</AvatarFallback>
+                <AvatarFallback className={`text-xs ${user ? ROLE_COLORS[user.role] : 'bg-primary text-primary-foreground'}`}>{initials}</AvatarFallback>
               </Avatar>
               <div className="hidden lg:block text-left leading-tight">
-                <div className="text-xs font-medium">Admin Office</div>
-                <div className="text-[10px] text-muted-foreground">Super Admin</div>
+                <div className="text-xs font-medium truncate max-w-[120px]">{user?.name || 'Guest'}</div>
+                <div className="text-[10px] text-muted-foreground">{user ? ROLE_LABELS[user.role] : 'Not signed in'}</div>
               </div>
               <ChevronDown className="size-3.5 text-muted-foreground hidden lg:block" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuLabel>My Account</DropdownMenuLabel>
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuLabel>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-sm">{user?.name}</span>
+                <span className="text-[11px] font-normal text-muted-foreground truncate">{user?.email}</span>
+                <span className={`text-[10px] inline-flex items-center gap-1 mt-1 w-fit px-1.5 py-0.5 rounded ${user ? ROLE_COLORS[user.role] : ''}`}><RoleIcon className="size-2.5" />{user ? ROLE_LABELS[user.role] : ''}</span>
+              </div>
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Profile</DropdownMenuItem>
-            <DropdownMenuItem>Settings</DropdownMenuItem>
-            <DropdownMenuItem>Help & Support</DropdownMenuItem>
+            <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">Switch demo role</DropdownMenuLabel>
+            {([
+              { role: 'super_admin' as Role, email: 'superadmin@vidyamatrix.edu', pw: 'super123' },
+              { role: 'admin' as Role, email: 'admin@vidyamatrix.edu', pw: 'admin123' },
+              { role: 'teacher' as Role, email: 'teacher@vidyamatrix.edu', pw: 'teacher123' },
+              { role: 'student' as Role, email: 'student@vidyamatrix.edu', pw: 'student123' },
+              { role: 'parent' as Role, email: 'parent@vidyamatrix.edu', pw: 'parent123' },
+            ]).filter(a => a.role !== user?.role).map((a) => {
+              const Icon = ROLE_ICONS[a.role]
+              return (
+                <DropdownMenuItem key={a.role} onClick={() => switchUser(a.email, a.pw)} className="gap-2 cursor-pointer">
+                  <Icon className="size-3.5 text-muted-foreground" />
+                  <span>Sign in as {ROLE_LABELS[a.role]}</span>
+                </DropdownMenuItem>
+              )
+            })}
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">Sign out</DropdownMenuItem>
+            <DropdownMenuItem className="text-destructive gap-2 cursor-pointer" onClick={() => { logout(); window.location.reload() }}>
+              <LogOut className="size-3.5" /> Sign out
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

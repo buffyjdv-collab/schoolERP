@@ -1,6 +1,6 @@
 'use client'
 
-import { useStore } from '@/lib/store'
+import { useStore, useAccessibleModules } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, UserPlus, GraduationCap, CalendarCheck,
@@ -43,6 +43,7 @@ const groups = ['Overview', 'Academic Operations', 'Finance & HR', 'Resources', 
 
 export function Sidebar() {
   const { activeModule, setModule, sidebarCollapsed, toggleSidebar } = useStore()
+  const accessible = useAccessibleModules()
 
   return (
     <aside
@@ -73,13 +74,16 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto scroll-thin py-3 px-2 space-y-4">
-        {groups.map((group) => (
+        {groups.map((group) => {
+          const groupItems = nav.filter((n) => n.group === group && accessible.includes(n.id))
+          if (!groupItems.length) return null
+          return (
           <div key={group}>
             {!sidebarCollapsed && (
               <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">{group}</div>
             )}
             <div className="space-y-0.5">
-              {nav.filter((n) => n.group === group).map((item) => {
+              {groupItems.map((item) => {
                 const Icon = item.icon
                 const active = activeModule === item.id
                 return (
@@ -108,7 +112,8 @@ export function Sidebar() {
               })}
             </div>
           </div>
-        ))}
+          )
+        })}
       </nav>
 
       {/* Footer */}
