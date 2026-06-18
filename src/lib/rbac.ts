@@ -6,7 +6,7 @@ export type Role = 'super_admin' | 'admin' | 'transport_manager' | 'teacher' | '
 export type ModuleId =
   | 'dashboard' | 'students' | 'admissions' | 'academics' | 'attendance'
   | 'fees' | 'exams' | 'timetable' | 'transport' | 'library'
-  | 'hr' | 'communication' | 'assets' | 'ai-assistant'
+  | 'hr' | 'communication' | 'assets' | 'ai-assistant' | 'user-management'
 
 export type Action =
   | 'view' | 'create' | 'edit' | 'delete' | 'approve'
@@ -16,6 +16,7 @@ export type Action =
 export const ALL_MODULES: ModuleId[] = [
   'dashboard', 'ai-assistant', 'admissions', 'students', 'academics', 'attendance',
   'exams', 'timetable', 'fees', 'hr', 'transport', 'library', 'assets', 'communication',
+  'user-management',
 ]
 
 export const ROLE_LABELS: Record<Role, string> = {
@@ -55,6 +56,7 @@ export const PERMISSIONS: Record<Role, Partial<Record<ModuleId, Action[]>>> = {
     library: A(['view','create','edit','issue','return','export']),
     assets: A(['view','create','edit','delete','export']),
     communication: A(['view','send','export']),
+    'user-management': A(['view','create','edit','delete']),
   },
   admin: {
     dashboard: A(['view','export']), 'ai-assistant': A(['view']),
@@ -135,6 +137,25 @@ export function actionsFor(role: Role, module: ModuleId): Action[] {
 
 // ============ DATA SCOPING ============
 
+export type DataScope = 'all' | 'own' | 'children' | 'assigned_classes' | 'none'
+
+export const SCOPE_LABELS: Record<DataScope, string> = {
+  all: 'All Records',
+  own: 'Own Records Only',
+  children: 'Children Only',
+  assigned_classes: 'Assigned Classes',
+  none: 'No Access',
+}
+
+/** Per-module override for a specific user. null fields = inherit role default. */
+export interface ModuleOverride {
+  actions?: Action[] | null      // null = inherit role; [] = no actions; [...] = custom set
+  dataScope?: DataScope | null   // null = inherit role
+  enabled?: boolean | null       // null = inherit role; true = force on; false = force off
+}
+
+export type UserOverrides = Partial<Record<ModuleId, ModuleOverride>>
+
 export interface AuthUser {
   id: string
   email: string
@@ -144,6 +165,7 @@ export interface AuthUser {
   studentId?: string | null
   teacherClassIds: string[]
   childrenStudentIds: string[]
+  overrides?: UserOverrides  // per-user customizations set by super admin
 }
 
 /** Whether the user sees all records or a scoped subset. */
@@ -151,12 +173,47 @@ export function isStaff(role: Role): boolean {
   return role === 'super_admin' || role === 'admin' || role === 'teacher'
 }
 
+/** Effective actions for a user on a module (role default + overrides). */
+export function effectiveActions(user: AuthUser, module: ModuleId): Action[] {
+  // Super admin always full access (can't be restricted)
+  if (user.role === 'super_admin') return PERMISSIONS.super_admin[module] ?? []
+  const ov = user.overrides?.[module]
+  // Force-disable
+  if (ov?.enabled === false) return []
+  // Custom actions override
+  if (ov?.actions !== undefined && ov.actions !== null) return ov.actions
+  // Inherit role default
+  return PERMISSIONS[user.role]?.[module] ?? []
+}
+
+/** Check if a USER (with overrides) can perform an action on a module. */
+export function canUser(user: AuthUser, module: ModuleId, action: Action = 'view'): boolean {
+  return effectiveActions(user, module).includes(action)
+}
+
+/** Modules a USER can view (considers overrides). */
+export function accessibleModulesForUser(user: AuthUser): ModuleId[] {
+  return ALL_MODULES.filter((m) => canUser(user, m, 'view'))
+}
+
+/** Effective data scope for a user on a module (override or role default). */
+export function effectiveDataScope(user: AuthUser, module: ModuleId): DataScope {
+  if (user.role === 'super_admin' || user.role === 'admin') return 'all'
+  const ov = user.overrides?.[module]
+  if (ov?.dataScope) return ov.dataScope
+  if (user.role === 'student') return 'own'
+  if (user.role === 'parent') return 'children'
+  if (user.role === 'teacher') return 'assigned_classes'
+  return 'none'
+}
+
 /** Student IDs a user is allowed to see. Returns 'all' for admin/super_admin. */
 export function visibleStudentIds(user: AuthUser): string[] | 'all' {
-  if (user.role === 'super_admin' || user.role === 'admin') return 'all'
-  if (user.role === 'student') return user.studentId ? [user.studentId] : []
-  if (user.role === 'parent') return user.childrenStudentIds
-  if (user.role === 'teacher') return 'all' // teacher filtering is class-based; applied separately
+  const scope = effectiveDataScope(user, 'students')
+  if (scope === 'all') return 'all'
+  if (scope === 'own') return user.studentId ? [user.studentId] : []
+  if (scope === 'children') return user.childrenStudentIds
+  if (scope === 'assigned_classes') return 'all' // teacher filtering applied separately
   return []
 }
 
@@ -164,6 +221,85 @@ export function visibleStudentIds(user: AuthUser): string[] | 'all' {
 export function visibleClassIds(user: AuthUser): string[] | 'all' {
   if (user.role === 'super_admin' || user.role === 'admin') return 'all'
   if (user.role === 'teacher') return user.teacherClassIds
-  // student/parent — derived from their student(s)
-  return 'all' // caller will further filter by student ids
+  return 'all'
+}
+
+// ============ MODULE METADATA (for permission matrix UI) ============
+
+export const MODULE_LABELS: Record<ModuleId, string> = {
+  dashboard: 'Dashboard & MIS',
+  'ai-assistant': 'AI Assistant',
+  admissions: 'Admissions',
+  students: 'Student Management',
+  academics: 'Academics',
+  attendance: 'Attendance',
+  exams: 'Examinations',
+  timetable: 'Timetable',
+  fees: 'Fees & Accounts',
+  hr: 'HR & Payroll',
+  transport: 'Transport & GPS',
+  library: 'Library',
+  assets: 'Assets & Inventory',
+  communication: 'Communication',
+  'user-management': 'User Management',
+}
+
+export const MODULE_DESCRIPTIONS: Record<ModuleId, string> = {
+  dashboard: 'Institution-wide analytics, KPIs and MIS reports',
+  'ai-assistant': 'AI-powered assistant for data queries and message drafting',
+  admissions: 'Admission enquiries, applications and approval pipeline',
+  students: 'Student master records, profiles and transport assignment',
+  academics: 'Classes, sections, subjects and timetable management',
+  attendance: 'Daily attendance marking, UHF/RFID and class-wise rates',
+  exams: 'Exam scheduling, marks entry, progress cards and analysis',
+  timetable: 'Weekly class timetable generation and editing',
+  fees: 'Fee structures, invoices, collection, defaulters and accounting',
+  hr: 'Employee management, leave approvals and payroll processing',
+  transport: 'Buses, routes, drivers, stops and live GPS tracking',
+  library: 'Book catalog, issue/return and fine management',
+  assets: 'Fixed asset register with QR tagging and maintenance',
+  communication: 'SMS, Email, WhatsApp messaging and notification history',
+  'user-management': 'User accounts, role assignment and permission control',
+}
+
+/** All actions that can be toggled per module. */
+export const ALL_ACTIONS: Action[] = [
+  'view', 'create', 'edit', 'delete', 'approve', 'export',
+  'collect', 'mark', 'enter', 'send', 'issue', 'return', 'pay', 'run',
+]
+
+export const ACTION_LABELS: Record<Action, string> = {
+  view: 'View',
+  create: 'Create',
+  edit: 'Edit',
+  delete: 'Delete',
+  approve: 'Approve',
+  export: 'Export',
+  collect: 'Collect',
+  mark: 'Mark',
+  enter: 'Enter',
+  send: 'Send',
+  issue: 'Issue',
+  return: 'Return',
+  pay: 'Pay',
+  run: 'Run',
+}
+
+/** Actions relevant to each module (for the permission matrix). */
+export const MODULE_ACTIONS: Record<ModuleId, Action[]> = {
+  dashboard: ['view', 'export'],
+  'ai-assistant': ['view'],
+  admissions: ['view', 'create', 'edit', 'delete', 'approve'],
+  students: ['view', 'create', 'edit', 'delete', 'export'],
+  academics: ['view', 'create', 'edit', 'delete'],
+  attendance: ['view', 'mark', 'export'],
+  exams: ['view', 'enter', 'edit', 'delete', 'export'],
+  timetable: ['view', 'create', 'edit', 'delete', 'export'],
+  fees: ['view', 'create', 'edit', 'delete', 'collect', 'export'],
+  hr: ['view', 'create', 'edit', 'delete', 'approve', 'run', 'export'],
+  transport: ['view', 'create', 'edit', 'delete', 'export'],
+  library: ['view', 'create', 'edit', 'delete', 'issue', 'return', 'export'],
+  assets: ['view', 'create', 'edit', 'delete', 'export'],
+  communication: ['view', 'send', 'delete', 'export'],
+  'user-management': ['view', 'create', 'edit', 'delete'],
 }

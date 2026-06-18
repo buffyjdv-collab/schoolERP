@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, UserPlus, GraduationCap, CalendarCheck,
   Wallet, ClipboardList, CalendarDays, Bus, BookOpen, UsersRound,
-  MessageSquare, Package, Sparkles, ChevronLeft, School,
+  MessageSquare, Package, Sparkles, ChevronLeft, School, ShieldCheck,
 } from 'lucide-react'
 import type { ModuleId } from '@/lib/types'
 import { Badge } from '@/components/ui/badge'
@@ -37,9 +37,10 @@ const nav: NavItem[] = [
   { id: 'assets', label: 'Assets & Inventory', icon: Package, group: 'Resources' },
 
   { id: 'communication', label: 'Communication', icon: MessageSquare, group: 'Engagement' },
+  { id: 'user-management', label: 'User Management', icon: ShieldCheck, group: 'System', badge: 'SA' },
 ]
 
-const groups = ['Overview', 'Academic Operations', 'Finance & HR', 'Resources', 'Engagement']
+const groups = ['Overview', 'Academic Operations', 'Finance & HR', 'Resources', 'Engagement', 'System']
 
 export function Sidebar() {
   const { activeModule, setModule, sidebarCollapsed, toggleSidebar } = useStore()

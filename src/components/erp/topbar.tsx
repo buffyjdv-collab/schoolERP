@@ -42,6 +42,7 @@ const moduleTitles: Record<string, string> = {
   library: 'Library Management',
   assets: 'Assets & Inventory',
   communication: 'Communication Center',
+  'user-management': 'User Management & Access Control',
 }
 
 export function Topbar() {

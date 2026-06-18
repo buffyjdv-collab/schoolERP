@@ -19,7 +19,8 @@ import { HrModule } from '@/components/modules/hr'
 import { CommunicationModule } from '@/components/modules/communication'
 import { AssetsModule } from '@/components/modules/assets'
 import { AiAssistantModule } from '@/components/modules/ai-assistant'
-import { can } from '@/lib/rbac'
+import { UserManagementModule } from '@/components/modules/user-management'
+import { canUser } from '@/lib/rbac'
 import { Loader2, School } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useEffect } from 'react'
@@ -39,6 +40,7 @@ const modules: Record<string, React.ComponentType> = {
   communication: CommunicationModule,
   assets: AssetsModule,
   'ai-assistant': AiAssistantModule,
+  'user-management': UserManagementModule,
 }
 
 export function ErpLayout() {
@@ -74,7 +76,7 @@ export function ErpLayout() {
   }
 
   // Guard: if the user's role cannot view the active module, redirect to dashboard
-  const allowed = can(user.role, activeModule as any, 'view')
+  const allowed = canUser(user, activeModule as any, 'view')
   const effectiveModule = allowed ? activeModule : 'dashboard'
   const Active = modules[effectiveModule] || DashboardModule
 

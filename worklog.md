@@ -628,3 +628,35 @@ Stage Summary:
 - Admin (and transport_manager) can assign bus/route to students in TWO places: (1) inline Transport column in the student table, (2) Transport & Medical section in the profile drawer. Both show the assigned route + bus number.
 - Students see ONLY their own record; parents see ONLY their children's records. All other students' data is hidden everywhere (table, profile drawer, search results, stats). Backend enforces this via role-scoped queries + ownership checks; frontend hides columns/buttons via isRestricted + canEdit guards.
 - ESLint: 0 errors. Agent-browser verified admin inline-assign + student/parent restrictions.
+
+---
+Task ID: SA-1..7
+Agent: main
+Task: Super Admin advanced control — assign/de-assign modules, roles, CRUD, data restrictions per user
+
+Work Log:
+- Schema: added UserPermission model (userId, module, actions JSON, dataScope, enabled) with @@unique([userId, module]). Linked to User via permissions relation.
+- RBAC engine (rbac.ts): added DataScope type ('all'|'own'|'children'|'assigned_classes'|'none'), ModuleOverride interface, UserOverrides type. Added effectiveActions(), canUser(), accessibleModulesForUser(), effectiveDataScope() functions that check user overrides first, then fall back to role defaults. Super_admin always full access (can't be restricted). Added MODULE_LABELS, MODULE_DESCRIPTIONS, MODULE_ACTIONS, ACTION_LABELS, SCOPE_LABELS metadata for the permission matrix UI. Added 'user-management' ModuleId with super_admin-only access.
+- Auth (auth.ts): getCurrentUser() now loads UserPermission rows and parses them into overrides. requirePerm() uses canUser() (checks overrides) instead of can() (role-only). parseOverrides() helper converts DB rows to UserOverrides map.
+- Store (store.ts): AuthUser interface now includes overrides field. useCan() and useAccessibleModules() use canUser()/accessibleModulesForUser() (full user with overrides) instead of role-only functions.
+- Backend API:
+  - GET /api/admin/users — lists all users with their overrides (super_admin only)
+  - PATCH /api/admin/users/[id] — change user role (can't change own, can't change super_admin)
+  - PUT /api/admin/users/[id] — toggle user active/inactive
+  - GET /api/admin/users/[id]/permissions — role defaults + overrides for a user
+  - PUT /api/admin/users/[id]/permissions — save per-module overrides (actions, dataScope, enabled)
+  - DELETE /api/admin/users/[id]/permissions — reset all overrides to role defaults
+- UI: built UserManagementModule with:
+  - Advanced Access Control banner + 4 summary cards (Total Users, Active, With Overrides, Roles)
+  - User list (left, searchable) with role badges, custom-override indicators, class/children counts
+  - Permission Editor (right): user header with Change Role / Activate-Deactivate buttons; module permission matrix with per-module enable/disable switch, action chip toggles (View/Create/Edit/Delete/etc.), data scope selector (All/Own/Children/Assigned Classes/None); Save/Reset buttons; help panel explaining how overrides work
+  - Super admin users show "cannot be modified" notice
+- Sidebar: added 'User Management' under new 'System' group (ShieldCheck icon, 'SA' badge), only visible to super_admin
+- Layout: registered UserManagementModule in module router; permission check uses canUser() (with overrides)
+- Verified: super admin restricted HR module for admin user → admin's sidebar hid HR → HR API returned 403 → students API still 200 → super admin reset → HR access restored (200). Full cycle: restrict → enforce → reset → restore.
+
+Stage Summary:
+- Super Admin has advanced control over every user's access: assign/change roles, toggle modules on/off, customize CRUD actions per module, set data scope (all/own/children/assigned_classes/none).
+- Changes take effect immediately on the user's next API request (session cookie persists, but requirePerm() checks live DB overrides).
+- Super admin cannot be restricted (always full access). Cannot modify own role/permissions.
+- ESLint: 0 errors. Agent-browser verified restrict/enforce/reset cycle.

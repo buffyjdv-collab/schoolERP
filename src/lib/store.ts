@@ -1,8 +1,8 @@
 'use client'
 
 import { create } from 'zustand'
-import type { Role, ModuleId, Action } from './rbac'
-import { can, accessibleModules, actionsFor, isStaff } from './rbac'
+import type { Role, ModuleId, Action, UserOverrides } from './rbac'
+import { canUser, accessibleModulesForUser, isStaff } from './rbac'
 
 export interface AuthUser {
   id: string
@@ -13,6 +13,7 @@ export interface AuthUser {
   studentId?: string | null
   teacherClassIds: string[]
   childrenStudentIds: string[]
+  overrides?: UserOverrides  // per-user permission overrides (super admin control)
 }
 
 interface AppState {
@@ -53,21 +54,16 @@ export const useStore = create<AppState>((set, get) => ({
   setAiAssistantOpen: (open) => set({ aiAssistantOpen: open }),
 }))
 
-// ============ Convenience hooks ============
+// ============ Convenience hooks (use full user with overrides) ============
 
 export function useCan(): (module: ModuleId, action?: Action) => boolean {
-  const role = useStore((s) => s.user?.role)
-  return (module, action = 'view') => (role ? can(role, module, action) : false)
+  const user = useStore((s) => s.user)
+  return (module, action = 'view') => (user ? canUser(user, module, action) : false)
 }
 
 export function useAccessibleModules(): ModuleId[] {
-  const role = useStore((s) => s.user?.role)
-  return role ? accessibleModules(role) : []
-}
-
-export function useActionsFor(module: ModuleId): Action[] {
-  const role = useStore((s) => s.user?.role)
-  return role ? actionsFor(role, module) : []
+  const user = useStore((s) => s.user)
+  return user ? accessibleModulesForUser(user) : []
 }
 
 export function useIsStaff(): boolean {

@@ -447,7 +447,7 @@ model User {
   email          String         @unique
   name           String
   passwordHash   String
-  role           String // super_admin | admin | teacher | student | parent
+  role           String // super_admin | admin | transport_manager | teacher | student | parent
   employeeId     String? // link to Employee (for admin/teacher)
   studentId      String? // link to Student (for student role)
   active         Boolean        @default(true)
@@ -456,6 +456,25 @@ model User {
   updatedAt      DateTime       @updatedAt
   teacherClasses TeacherClass[] // classes a teacher can access
   parentLinks    ParentChild[] // children a parent can access
+  permissions    UserPermission[] // per-user module/action overrides (super admin control)
+}
+
+// Per-user permission overrides — Super Admin can customize any user's access
+model UserPermission {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module    String   // ModuleId (dashboard, students, fees, ...)
+  // Custom actions JSON array (e.g. '["view","create","edit"]'). null = inherit role default.
+  actions   String?
+  // Data scope: 'all' | 'own' | 'children' | 'assigned_classes' | 'none'. null = inherit role default.
+  dataScope String?
+  // Force-enable (true) or force-disable (false) the module for this user. null = inherit role default.
+  enabled   Boolean?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, module])
 }
 
 model TeacherClass {

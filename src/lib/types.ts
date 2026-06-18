@@ -2,7 +2,7 @@
 export type ModuleId =
   | 'dashboard' | 'students' | 'admissions' | 'academics' | 'attendance'
   | 'fees' | 'exams' | 'timetable' | 'transport' | 'library'
-  | 'hr' | 'communication' | 'assets' | 'ai-assistant' | 'settings'
+  | 'hr' | 'communication' | 'assets' | 'ai-assistant' | 'settings' | 'user-management'
 
 export interface Student {
   id: string

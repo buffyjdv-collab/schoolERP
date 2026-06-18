@@ -3,8 +3,8 @@ import { cookies } from 'next/headers'
 import { createHmac } from 'crypto'
 import { NextResponse } from 'next/server'
 import { db } from './db'
-import { can } from './rbac'
-import type { AuthUser, Role, ModuleId, Action } from './rbac'
+import { canUser } from './rbac'
+import type { AuthUser, Role, ModuleId, Action, UserOverrides, ModuleOverride, DataScope } from './rbac'
 
 const SECRET = process.env.AUTH_SECRET || 'vidyamatrix-dev-secret-9f3k2j'
 const COOKIE_NAME = 'erp_session'
@@ -37,6 +37,22 @@ export function createSessionToken(userId: string): string {
 
 export const SESSION_COOKIE = COOKIE_NAME
 
+/** Parse DB UserPermission rows into a UserOverrides map. */
+function parseOverrides(perms: any[]): UserOverrides {
+  const out: UserOverrides = {}
+  for (const p of perms) {
+    const mod = p.module as ModuleId
+    const ov: ModuleOverride = {}
+    if (p.actions !== null) {
+      try { ov.actions = JSON.parse(p.actions) } catch { ov.actions = null }
+    }
+    if (p.dataScope !== null) ov.dataScope = p.dataScope as DataScope
+    if (p.enabled !== null) ov.enabled = p.enabled
+    out[mod] = ov
+  }
+  return out
+}
+
 /** Read the current user from the session cookie. Returns null if not authenticated. */
 export async function getCurrentUser(): Promise<AuthUser | null> {
   const store = await cookies()
@@ -47,7 +63,11 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 
   const user = await db.user.findUnique({
     where: { id: decoded.uid },
-    include: { teacherClasses: { select: { classId: true } }, parentLinks: { select: { studentId: true } } },
+    include: {
+      teacherClasses: { select: { classId: true } },
+      parentLinks: { select: { studentId: true } },
+      permissions: true,
+    },
   })
   if (!user || !user.active) return null
 
@@ -60,16 +80,17 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     studentId: user.studentId,
     teacherClassIds: user.teacherClasses.map((t) => t.classId),
     childrenStudentIds: user.parentLinks.map((p) => p.studentId),
+    overrides: parseOverrides(user.permissions),
   }
 }
 
-/** Require an authenticated user with a specific permission. Returns a guard result. */
+/** Require an authenticated user with a specific permission (checks per-user overrides). Returns a guard result. */
 export async function requirePerm(
   module: ModuleId,
   action: Action = 'view',
 ): Promise<{ ok: true; user: AuthUser } | { ok: false; res: NextResponse }> {
   const user = await getCurrentUser()
   if (!user) return { ok: false, res: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
-  if (!can(user.role, module, action)) return { ok: false, res: NextResponse.json({ error: 'Forbidden — insufficient role' }, { status: 403 }) }
+  if (!canUser(user, module, action)) return { ok: false, res: NextResponse.json({ error: 'Forbidden — insufficient permissions' }, { status: 403 }) }
   return { ok: true, user }
 }

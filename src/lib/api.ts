@@ -146,4 +146,12 @@ export const api = {
     insights: () => jfetch<{ insights: string }>(`/api/ai/insights`),
     composeMessage: (data: { channel: string; topic: string; audience: string }) => jfetch<{ message: string; subject?: string }>(`/api/ai/compose`, { method: 'POST', body: JSON.stringify(data) }),
   },
+  admin: {
+    users: () => jfetch<{ users: any[]; roles: string[]; modules: string[] }>('/api/admin/users'),
+    getUserPermissions: (id: string) => jfetch<any>(`/api/admin/users/${id}/permissions`),
+    saveUserPermissions: (id: string, overrides: any) => jfetch<any>(`/api/admin/users/${id}/permissions`, { method: 'PUT', body: JSON.stringify({ overrides }) }),
+    resetUserPermissions: (id: string) => jfetch<any>(`/api/admin/users/${id}/permissions`, { method: 'DELETE' }),
+    setUserRole: (id: string, role: string) => jfetch<any>(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+    toggleUserActive: (id: string, active: boolean) => jfetch<any>(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify({ active }) }),
+  },
 }
