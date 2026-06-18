@@ -1,0 +1,496 @@
+     1→'use client'
+     2→
+     3→import { useState } from 'react'
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→import { api } from '@/lib/api'
+     6→import type { Employee, LeaveRequest, Payroll } from '@/lib/types'
+     7→import { useCan } from '@/lib/store'
+     8→import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
+     9→import {
+    10→  Card, CardContent, CardHeader, CardTitle,
+    11→} from '@/components/ui/card'
+    12→import { Button } from '@/components/ui/button'
+    13→import { Input } from '@/components/ui/input'
+    14→import { Label } from '@/components/ui/label'
+    15→import { Badge } from '@/components/ui/badge'
+    16→import { Skeleton } from '@/components/ui/skeleton'
+    17→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    18→import {
+    19→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell, TableFooter,
+    20→} from '@/components/ui/table'
+    21→import {
+    22→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
+    23→} from '@/components/ui/dialog'
+    24→import {
+    25→  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+    26→} from '@/components/ui/select'
+    27→import {
+    28→  Users, CalendarOff, CalendarClock, Wallet, Search, UserCheck, BadgeCheck,
+    29→  ShieldCheck, Crown, Ban, FileText, PlayCircle, IndianRupee, Mail, Phone, MapPin,
+    30→  ShieldAlert,
+    31→} from 'lucide-react'
+    32→import { toast } from 'sonner'
+    33→
+    34→function fmtDate(iso: string) {
+    35→  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    36→}
+    37→
+    38→function fmtINR(n: number) {
+    39→  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
+    40→}
+    41→
+    42→function fmtINRShort(n: number) {
+    43→  if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`
+    44→  if (n >= 100000) return `₹${(n / 100000).toFixed(2)} L`
+    45→  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}K`
+    46→  return `₹${n}`
+    47→}
+    48→
+    49→function initials(name: string) {
+    50→  return name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
+    51→}
+    52→
+    53→function dayCount(start: string, end: string) {
+    54→  const d = Math.ceil((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1
+    55→  return d
+    56→}
+    57→
+    58→// ============ Employees Tab ============
+    59→function EmployeesTab({ employees }: { employees: Employee[] }) {
+    60→  const [q, setQ] = useState('')
+    61→  const [dept, setDept] = useState('all')
+    62→  const [selected, setSelected] = useState<Employee | null>(null)
+    63→
+    64→  const depts = Array.from(new Set(employees.map((e) => e.department))).sort()
+    65→  const filtered = employees.filter((e) => {
+    66→    if (dept !== 'all' && e.department !== dept) return false
+    67→    if (!q) return true
+    68→    const s = q.toLowerCase()
+    69→    return e.fullName.toLowerCase().includes(s) || e.empCode.toLowerCase().includes(s) || e.designation.toLowerCase().includes(s) || (e.email || '').toLowerCase().includes(s)
+    70→  })
+    71→
+    72→  return (
+    73→    <Card>
+    74→      <CardHeader className="pb-3">
+    75→        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    76→          <div>
+    77→            <CardTitle className="text-base flex items-center gap-2"><Users className="size-4 text-primary" /> Employees</CardTitle>
+    78→            <p className="text-xs text-muted-foreground mt-1">{filtered.length} of {employees.length} staff</p>
+    79→          </div>
+    80→          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+    81→            <Select value={dept} onValueChange={setDept}>
+    82→              <SelectTrigger className="w-full sm:w-48"><SelectValue placeholder="Department" /></SelectTrigger>
+    83→              <SelectContent>
+    84→                <SelectItem value="all">All Departments</SelectItem>
+    85→                {depts.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+    86→              </SelectContent>
+    87→            </Select>
+    88→            <div className="relative w-full sm:w-64">
+    89→              <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+    90→              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, code, email…" className="pl-9" />
+    91→            </div>
+    92→          </div>
+    93→        </div>
+    94→      </CardHeader>
+    95→      <CardContent className="px-0">
+    96→        {filtered.length === 0 ? (
+    97→          <div className="px-6 pb-4"><EmptyState icon={Users} title="No employees found" description={q || dept !== 'all' ? 'Try a different search or filter.' : 'Employees will appear here.'} /></div>
+    98→        ) : (
+    99→          <div className="max-h-[60vh] overflow-y-auto scroll-thin">
+   100→            <Table>
+   101→              <TableHeader className="sticky top-0 bg-card z-10">
+   102→                <TableRow>
+   103→                  <TableHead className="w-24">Emp Code</TableHead>
+   104→                  <TableHead className="min-w-[180px]">Name</TableHead>
+   105→                  <TableHead className="hidden md:table-cell">Designation</TableHead>
+   106→                  <TableHead className="hidden lg:table-cell">Department</TableHead>
+   107→                  <TableHead className="hidden sm:table-cell">Phone</TableHead>
+   108→                  <TableHead className="hidden xl:table-cell">Joined</TableHead>
+   109→                  <TableHead className="text-right">Salary</TableHead>
+   110→                  <TableHead>Status</TableHead>
+   111→                </TableRow>
+   112→              </TableHeader>
+   113→              <TableBody>
+   114→                {filtered.map((e) => (
+   115→                  <TableRow key={e.id} className="hover:bg-accent/50 cursor-pointer" onClick={() => setSelected(e)}>
+   116→                    <TableCell className="font-mono text-xs">{e.empCode}</TableCell>
+   117→                    <TableCell>
+   118→                      <div className="flex items-center gap-2.5">
+   119→                        <div className="size-8 rounded-full bg-primary/10 text-primary grid place-items-center text-xs font-semibold shrink-0">{initials(e.fullName)}</div>
+   120→                        <div className="min-w-0">
+   121→                          <div className="text-sm font-medium truncate">{e.fullName}</div>
+   122→                          <div className="text-xs text-muted-foreground md:hidden truncate">{e.designation}</div>
+   123→                        </div>
+   124→                      </div>
+   125→                    </TableCell>
+   126→                    <TableCell className="hidden md:table-cell text-sm">{e.designation}</TableCell>
+   127→                    <TableCell className="hidden lg:table-cell"><Badge variant="outline" className="text-[10px]">{e.department}</Badge></TableCell>
+   128→                    <TableCell className="hidden sm:table-cell text-xs">{e.phone}</TableCell>
+   129→                    <TableCell className="hidden xl:table-cell text-xs text-muted-foreground">{fmtDate(e.joiningDate)}</TableCell>
+   130→                    <TableCell className="text-right text-xs tabular-nums">{fmtINR(e.salary)}</TableCell>
+   131→                    <TableCell><StatusBadge status={e.status} /></TableCell>
+   132→                  </TableRow>
+   133→                ))}
+   134→              </TableBody>
+   135→            </Table>
+   136→          </div>
+   137→        )}
+   138→      </CardContent>
+   139→
+   140→      <EmployeeDialog employee={selected} open={!!selected} onOpenChange={(v) => !v && setSelected(null)} />
+   141→    </Card>
+   142→  )
+   143→}
+   144→
+   145→function EmployeeDialog({ employee, open, onOpenChange }: { employee: Employee | null; open: boolean; onOpenChange: (v: boolean) => void }) {
+   146→  if (!employee) return null
+   147→  return (
+   148→    <Dialog open={open} onOpenChange={onOpenChange}>
+   149→      <DialogContent className="sm:max-w-md">
+   150→        <DialogHeader>
+   151→          <DialogTitle className="flex items-center gap-2"><UserCheck className="size-4 text-primary" /> Employee Details</DialogTitle>
+   152→          <DialogDescription>HR record for {employee.empCode}</DialogDescription>
+   153→        </DialogHeader>
+   154→        <div className="space-y-4">
+   155→          <div className="flex items-center gap-3">
+   156→            <div className="size-14 rounded-full bg-primary/10 text-primary grid place-items-center text-lg font-semibold">{initials(employee.fullName)}</div>
+   157→            <div>
+   158→              <p className="font-semibold">{employee.fullName}</p>
+   159→              <p className="text-xs text-muted-foreground">{employee.designation} · {employee.department}</p>
+   160→              <div className="mt-1"><StatusBadge status={employee.status} /></div>
+   161→            </div>
+   162→          </div>
+   163→          <div className="grid grid-cols-2 gap-3 text-sm">
+   164→            <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Emp Code</p><p className="font-mono text-xs">{employee.empCode}</p></div>
+   165→            <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Joining Date</p><p>{fmtDate(employee.joiningDate)}</p></div>
+   166→            <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Gender</p><p>{employee.gender}</p></div>
+   167→            <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Date of Birth</p><p>{employee.dob ? fmtDate(employee.dob) : '—'}</p></div>
+   168→            <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Salary</p><p className="font-medium">{fmtINR(employee.salary)}/mo</p></div>
+   169→            <div className="space-y-0.5"><p className="text-xs text-muted-foreground">Email</p><p className="truncate text-xs">{employee.email || '—'}</p></div>
+   170→          </div>
+   171→          <div className="rounded-lg border p-3 space-y-1.5 text-sm bg-muted/30">
+   172→            <div className="flex items-center gap-2 text-xs text-muted-foreground"><Phone className="size-3.5" /> {employee.phone}</div>
+   173→            {employee.email && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Mail className="size-3.5" /> {employee.email}</div>}
+   174→            {employee.address && <div className="flex items-start gap-2 text-xs text-muted-foreground"><MapPin className="size-3.5 mt-0.5 shrink-0" /> {employee.address}</div>}
+   175→          </div>
+   176→        </div>
+   177→      </DialogContent>
+   178→    </Dialog>
+   179→  )
+   180→}
+   181→
+   182→// ============ Leave Requests Tab ============
+   183→function LeavesTab({ leaves }: { leaves: LeaveRequest[] }) {
+   184→  const qc = useQueryClient()
+   185→  const canApprove = useCan()('hr', 'approve')
+   186→  const [q, setQ] = useState('')
+   187→  const [statusFilter, setStatusFilter] = useState('all')
+   188→
+   189→  const approveMut = useMutation({
+   190→    mutationFn: ({ id, status }: { id: string; status: string }) => api.hr.approveLeave(id, status),
+   191→    onSuccess: (_d, vars) => {
+   192→      const label = vars.status === 'HODApproved' ? 'HOD approved' : vars.status === 'PrincipalApproved' ? 'Principal approved' : 'rejected'
+   193→      toast.success(`Leave ${label}`, { description: 'The leave request has been updated.' })
+   194→      qc.invalidateQueries({ queryKey: ['hr', 'leaves'] })
+   195→    },
+   196→    onError: () => toast.error('Failed to update leave'),
+   197→  })
+   198→
+   199→  const filtered = leaves.filter((l) => {
+   200→    if (statusFilter !== 'all' && l.status !== statusFilter) return false
+   201→    if (!q) return true
+   202→    const s = q.toLowerCase()
+   203→    return l.employeeName.toLowerCase().includes(s) || l.empCode.toLowerCase().includes(s) || l.leaveType.toLowerCase().includes(s) || l.reason.toLowerCase().includes(s)
+   204→  })
+   205→
+   206→  return (
+   207→    <Card>
+   208→      <CardHeader className="pb-3">
+   209→        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+   210→          <div>
+   211→            <CardTitle className="text-base flex items-center gap-2"><CalendarOff className="size-4 text-primary" /> Leave Requests</CardTitle>
+   212→            <p className="text-xs text-muted-foreground mt-1">{filtered.length} of {leaves.length} requests</p>
+   213→          </div>
+   214→          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+   215→            <Select value={statusFilter} onValueChange={setStatusFilter}>
+   216→              <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+   217→              <SelectContent>
+   218→                <SelectItem value="all">All Statuses</SelectItem>
+   219→                <SelectItem value="Pending">Pending</SelectItem>
+   220→                <SelectItem value="HODApproved">HOD Approved</SelectItem>
+   221→                <SelectItem value="PrincipalApproved">Principal Approved</SelectItem>
+   222→                <SelectItem value="Rejected">Rejected</SelectItem>
+   223→              </SelectContent>
+   224→            </Select>
+   225→            <div className="relative w-full sm:w-64">
+   226→              <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+   227→              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search employee, type, reason…" className="pl-9" />
+   228→            </div>
+   229→          </div>
+   230→        </div>
+   231→      </CardHeader>
+   232→      <CardContent className="px-0">
+   233→        {filtered.length === 0 ? (
+   234→          <div className="px-6 pb-4"><EmptyState icon={CalendarOff} title="No leave requests" description={q || statusFilter !== 'all' ? 'Try a different filter.' : 'Leave applications will appear here.'} /></div>
+   235→        ) : (
+   236→          <div className="max-h-[60vh] overflow-y-auto scroll-thin">
+   237→            <Table>
+   238→              <TableHeader className="sticky top-0 bg-card z-10">
+   239→                <TableRow>
+   240→                  <TableHead className="min-w-[180px]">Employee</TableHead>
+   241→                  <TableHead className="hidden md:table-cell">Designation</TableHead>
+   242→                  <TableHead>Leave Type</TableHead>
+   243→                  <TableHead>Duration</TableHead>
+   244→                  <TableHead className="hidden lg:table-cell min-w-[200px]">Reason</TableHead>
+   245→                  <TableHead>Status</TableHead>
+   246→                  <TableHead className="text-right">Actions</TableHead>
+   247→                </TableRow>
+   248→              </TableHeader>
+   249→              <TableBody>
+   250→                {filtered.map((l) => {
+   251→                  const days = dayCount(l.startDate, l.endDate)
+   252→                  const pending = l.status === 'Pending'
+   253→                  return (
+   254→                    <TableRow key={l.id} className="hover:bg-accent/50">
+   255→                      <TableCell>
+   256→                        <div className="text-sm font-medium">{l.employeeName}</div>
+   257→                        <div className="text-xs text-muted-foreground font-mono">{l.empCode}</div>
+   258→                      </TableCell>
+   259→                      <TableCell className="hidden md:table-cell text-xs">{l.designation}</TableCell>
+   260→                      <TableCell><Badge variant="outline" className="text-[10px]">{l.leaveType}</Badge></TableCell>
+   261→                      <TableCell>
+   262→                        <div className="text-xs">{fmtDate(l.startDate)} → {fmtDate(l.endDate)}</div>
+   263→                        <div className="text-[11px] text-muted-foreground">{days} day{days !== 1 ? 's' : ''}</div>
+   264→                      </TableCell>
+   265→                      <TableCell className="hidden lg:table-cell text-xs text-muted-foreground max-w-[260px] truncate">{l.reason}</TableCell>
+   266→                      <TableCell><StatusBadge status={l.status} /></TableCell>
+   267→                      <TableCell className="text-right">
+   268→                        {pending ? (
+   269→                          canApprove ? (
+   270→                            <div className="flex justify-end gap-1.5">
+   271→                              <Button size="sm" variant="outline" className="h-8 gap-1 px-2" disabled={approveMut.isPending} onClick={() => approveMut.mutate({ id: l.id, status: 'HODApproved' })} title="HOD Approve">
+   272→                                <ShieldCheck className="size-3.5" /> <span className="hidden xl:inline">HOD</span>
+   273→                              </Button>
+   274→                              <Button size="sm" variant="default" className="h-8 gap-1 px-2" disabled={approveMut.isPending} onClick={() => approveMut.mutate({ id: l.id, status: 'PrincipalApproved' })} title="Principal Approve">
+   275→                                <Crown className="size-3.5" /> <span className="hidden xl:inline">Principal</span>
+   276→                              </Button>
+   277→                              <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10" disabled={approveMut.isPending} onClick={() => approveMut.mutate({ id: l.id, status: 'Rejected' })} title="Reject">
+   278→                                <Ban className="size-3.5" />
+   279→                              </Button>
+   280→                            </div>
+   281→                          ) : (
+   282→                            <span className="text-xs text-muted-foreground italic">View only</span>
+   283→                          )
+   284→                        ) : (
+   285→                          <span className="text-xs text-muted-foreground">Resolved</span>
+   286→                        )}
+   287→                      </TableCell>
+   288→                    </TableRow>
+   289→                  )
+   290→                })}
+   291→              </TableBody>
+   292→            </Table>
+   293→          </div>
+   294→        )}
+   295→      </CardContent>
+   296→    </Card>
+   297→  )
+   298→}
+   299→
+   300→// ============ Payroll Tab ============
+   301→function PayrollTab() {
+   302→  const qc = useQueryClient()
+   303→  const canRun = useCan()('hr', 'run')
+   304→  const currentMonth = new Date().toISOString().slice(0, 7)
+   305→  const [month, setMonth] = useState(currentMonth)
+   306→
+   307→  const { data: payroll, isLoading } = useQuery({ queryKey: ['hr', 'payroll', month], queryFn: () => api.hr.payroll(month) })
+   308→
+   309→  const runMut = useMutation({
+   310→    mutationFn: (m: string) => api.hr.runPayroll(m),
+   311→    onSuccess: (data) => {
+   312→      toast.success('Payroll run complete', { description: `${data.created} payslips created (of ${data.total} active employees).` })
+   313→      qc.invalidateQueries({ queryKey: ['hr', 'payroll', month] })
+   314→    },
+   315→    onError: () => toast.error('Failed to run payroll'),
+   316→  })
+   317→
+   318→  const totals = (payroll || []).reduce(
+   319→    (acc, p) => ({ basic: acc.basic + p.basicSalary, allowances: acc.allowances + p.allowances, deductions: acc.deductions + p.deductions, net: acc.net + p.netPay }),
+   320→    { basic: 0, allowances: 0, deductions: 0, net: 0 },
+   321→  )
+   322→
+   323→  const markPaid = (p: Payroll) => {
+   324→    toast.success('Payslip generated', { description: `Payslip for ${p.employeeName} (${p.month}) is ready to disburse.` })
+   325→  }
+   326→
+   327→  return (
+   328→    <Card>
+   329→      <CardHeader className="pb-3">
+   330→        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+   331→          <div>
+   332→            <CardTitle className="text-base flex items-center gap-2"><Wallet className="size-4 text-primary" /> Payroll</CardTitle>
+   333→            <p className="text-xs text-muted-foreground mt-1">{payroll?.length ?? 0} payslips for {new Date(month + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}</p>
+   334→          </div>
+   335→          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+   336→            <div className="space-y-1">
+   337→              <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-full sm:w-44" />
+   338→            </div>
+   339→            {canRun && (
+   340→              <Button onClick={() => runMut.mutate(month)} disabled={runMut.isPending} className="gap-1.5">
+   341→                {runMut.isPending ? <PlayCircle className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
+   342→                Run Payroll
+   343→              </Button>
+   344→            )}
+   345→          </div>
+   346→        </div>
+   347→      </CardHeader>
+   348→      <CardContent className="px-0">
+   349→        {isLoading ? (
+   350→          <div className="px-6 pb-4 space-y-2">
+   351→            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+   352→          </div>
+   353→        ) : !payroll || payroll.length === 0 ? (
+   354→          <div className="px-6 pb-4"><EmptyState icon={Wallet} title="No payroll for this month" description="Click Run Payroll to generate payslips for all active employees." /></div>
+   355→        ) : (
+   356→          <div className="max-h-[60vh] overflow-y-auto scroll-thin">
+   357→            <Table>
+   358→              <TableHeader className="sticky top-0 bg-card z-10">
+   359→                <TableRow>
+   360→                  <TableHead className="w-24">Emp Code</TableHead>
+   361→                  <TableHead className="min-w-[180px]">Employee</TableHead>
+   362→                  <TableHead className="text-right">Basic</TableHead>
+   363→                  <TableHead className="text-right hidden sm:table-cell">Allowances</TableHead>
+   364→                  <TableHead className="text-right hidden sm:table-cell">Deductions</TableHead>
+   365→                  <TableHead className="text-right">Net Pay</TableHead>
+   366→                  <TableHead>Status</TableHead>
+   367→                  <TableHead className="text-right">Action</TableHead>
+   368→                </TableRow>
+   369→              </TableHeader>
+   370→              <TableBody>
+   371→                {payroll.map((p) => (
+   372→                  <TableRow key={p.id} className="hover:bg-accent/50">
+   373→                    <TableCell className="font-mono text-xs">{p.empCode}</TableCell>
+   374→                    <TableCell>
+   375→                      <div className="text-sm font-medium">{p.employeeName}</div>
+   376→                      <div className="text-xs text-muted-foreground">{p.month}</div>
+   377→                    </TableCell>
+   378→                    <TableCell className="text-right text-xs tabular-nums">{fmtINR(p.basicSalary)}</TableCell>
+   379→                    <TableCell className="text-right text-xs tabular-nums hidden sm:table-cell text-emerald-600">+{fmtINR(p.allowances)}</TableCell>
+   380→                    <TableCell className="text-right text-xs tabular-nums hidden sm:table-cell text-rose-600">−{fmtINR(p.deductions)}</TableCell>
+   381→                    <TableCell className="text-right text-sm font-semibold tabular-nums">{fmtINR(p.netPay)}</TableCell>
+   382→                    <TableCell><StatusBadge status={p.status} /></TableCell>
+   383→                    <TableCell className="text-right">
+   384→                      {p.status === 'Processed' ? (
+   385→                        <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => markPaid(p)}>
+   386→                          <FileText className="size-3.5" /> <span className="hidden lg:inline">Mark Paid</span>
+   387→                        </Button>
+   388→                      ) : (
+   389→                        <span className="text-xs text-muted-foreground">{p.paidAt ? fmtDate(p.paidAt) : '—'}</span>
+   390→                      )}
+   391→                    </TableCell>
+   392→                  </TableRow>
+   393→                ))}
+   394→              </TableBody>
+   395→              <TableFooter className="sticky bottom-0 bg-muted/50 backdrop-blur">
+   396→                <TableRow className="font-semibold">
+   397→                  <TableCell colSpan={2} className="text-sm">Totals ({payroll.length} employees)</TableCell>
+   398→                  <TableCell className="text-right text-xs tabular-nums">{fmtINR(totals.basic)}</TableCell>
+   399→                  <TableCell className="text-right text-xs tabular-nums hidden sm:table-cell text-emerald-600">+{fmtINR(totals.allowances)}</TableCell>
+   400→                  <TableCell className="text-right text-xs tabular-nums hidden sm:table-cell text-rose-600">−{fmtINR(totals.deductions)}</TableCell>
+   401→                  <TableCell className="text-right text-sm font-bold tabular-nums">{fmtINR(totals.net)}</TableCell>
+   402→                  <TableCell colSpan={2} />
+   403→                </TableRow>
+   404→              </TableFooter>
+   405→            </Table>
+   406→          </div>
+   407→        )}
+   408→      </CardContent>
+   409→    </Card>
+   410→  )
+   411→}
+   412→
+   413→// ============ Main module ============
+   414→export function HrModule() {
+   415→  // Defensive guard: the sidebar hides HR from non-admin roles and the
+   416→  // backend returns 403, but if a user navigates directly we render an
+   417→  // Access Denied state instead of attempting to load data.
+   418→  const canView = useCan()('hr', 'view')
+   419→
+   420→  const { data: employees, isLoading: empLoading } = useQuery({
+   421→    queryKey: ['hr', 'employees'],
+   422→    queryFn: api.hr.employees,
+   423→    enabled: canView,
+   424→  })
+   425→  const { data: leaves, isLoading: leavesLoading } = useQuery({
+   426→    queryKey: ['hr', 'leaves'],
+   427→    queryFn: api.hr.leaves,
+   428→    enabled: canView,
+   429→  })
+   430→  const currentMonth = new Date().toISOString().slice(0, 7)
+   431→  const { data: payroll, isLoading: payLoading } = useQuery({
+   432→    queryKey: ['hr', 'payroll', currentMonth],
+   433→    queryFn: () => api.hr.payroll(currentMonth),
+   434→    enabled: canView,
+   435→  })
+   436→
+   437→  if (!canView) {
+   438→    return (
+   439→      <div className="space-y-6">
+   440→        <SectionHeader
+   441→          title="HR & Payroll"
+   442→          description="Manage staff records, leave approvals and monthly payroll."
+   443→        />
+   444→        <Card>
+   445→          <CardContent className="py-2">
+   446→            <EmptyState
+   447→              icon={ShieldAlert}
+   448→              title="Access Denied"
+   449→              description="You do not have permission to view the HR & Payroll module. Please contact an administrator if you believe this is an error."
+   450→            />
+   451→          </CardContent>
+   452→        </Card>
+   453→      </div>
+   454→    )
+   455→  }
+   456→
+   457→  const totalEmployees = employees?.length ?? 0
+   458→  const today = new Date().toISOString().slice(0, 10)
+   459→  const onLeaveToday = leaves?.filter((l) => l.status === 'PrincipalApproved' && new Date(l.startDate).getTime() <= Date.now() && new Date(l.endDate).getTime() >= Date.now()).length ?? 0
+   460→  const pendingLeaves = leaves?.filter((l) => l.status === 'Pending').length ?? 0
+   461→  const monthlyPayrollCost = payroll?.reduce((s, p) => s + p.netPay, 0) ?? 0
+   462→
+   463→  return (
+   464→    <div className="space-y-6">
+   465→      <SectionHeader
+   466→        title="HR & Payroll"
+   467→        description="Manage staff records, leave approvals and monthly payroll."
+   468→      />
+   469→
+   470→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   471→        <StatCard label="Total Employees" value={totalEmployees} sub={`${employees?.filter((e) => e.status === 'Active').length ?? 0} active`} icon={Users} accent="primary" loading={empLoading} />
+   472→        <StatCard label="On Leave Today" value={onLeaveToday} sub="Approved & current" icon={CalendarOff} accent="amber" loading={leavesLoading} />
+   473→        <StatCard label="Pending Leaves" value={pendingLeaves} sub="Awaiting approval" icon={CalendarClock} accent="rose" loading={leavesLoading} />
+   474→        <StatCard label="Monthly Payroll" value={fmtINRShort(monthlyPayrollCost)} sub={`For ${new Date(currentMonth + '-01').toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`} icon={Wallet} accent="emerald" loading={payLoading} />
+   475→      </div>
+   476→
+   477→      <Tabs defaultValue="employees">
+   478→        <TabsList>
+   479→          <TabsTrigger value="employees" className="gap-1.5"><Users className="size-4" /> Employees</TabsTrigger>
+   480→          <TabsTrigger value="leaves" className="gap-1.5"><CalendarOff className="size-4" /> Leave Requests</TabsTrigger>
+   481→          <TabsTrigger value="payroll" className="gap-1.5"><Wallet className="size-4" /> Payroll</TabsTrigger>
+   482→        </TabsList>
+   483→        <TabsContent value="employees" className="mt-4">
+   484→          {empLoading ? <Card><CardContent className="p-6 space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</CardContent></Card>
+   485→            : <EmployeesTab employees={employees || []} />}
+   486→        </TabsContent>
+   487→        <TabsContent value="leaves" className="mt-4">
+   488→          {leavesLoading ? <Card><CardContent className="p-6 space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</CardContent></Card>
+   489→            : <LeavesTab leaves={leaves || []} />}
+   490→        </TabsContent>
+   491→        <TabsContent value="payroll" className="mt-4"><PayrollTab /></TabsContent>
+   492→      </Tabs>
+   493→    </div>
+   494→  )
+   495→}
+   496→

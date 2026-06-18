@@ -1,18 +1,32 @@
 'use client'
 
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { useCan } from '@/lib/store'
 import { StatCard, SectionHeader, StatusBadge } from '@/components/erp/primitives'
 import type { Vehicle } from '@/lib/types'
 import {
   Bus, Users, Gauge, MapPin, Navigation, Radio, Fuel, Activity, Phone, Square, Circle, Triangle,
+  Plus, Pencil, Trash2,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
+import {
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+} from '@/components/ui/select'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useState, useEffect, useRef } from 'react'
 import { io, Socket } from 'socket.io-client'
 import { toast } from 'sonner'
@@ -35,6 +49,13 @@ interface LiveVehicle {
   lastUpdate: string
 }
 
+interface Stop {
+  id: string; name: string; routeName: string; lat: number; lng: number
+  pickupTime: string; dropTime: string; fare: number
+}
+
+const VEHICLE_TYPES = ['Bus', 'Mini Bus', 'Van', 'Car'] as const
+
 export function TransportModule() {
   const [liveVehicles, setLiveVehicles] = useState<LiveVehicle[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -42,8 +63,68 @@ export function TransportModule() {
   const socketRef = useRef<Socket | null>(null)
   const qc = useQueryClient()
 
+  const canCreate = useCan()('transport', 'create')
+  const canEdit = useCan()('transport', 'edit')
+  const canDelete = useCan()('transport', 'delete')
+
+  const [vehicleDialog, setVehicleDialog] = useState<{ mode: 'create' | 'edit'; target?: Vehicle } | null>(null)
+  const [vehicleDelete, setVehicleDelete] = useState<Vehicle | null>(null)
+  const [stopDialog, setStopDialog] = useState(false)
+  const [stopDelete, setStopDelete] = useState<Stop | null>(null)
+
   const { data: vehicles, isLoading } = useQuery({ queryKey: ['vehicles'], queryFn: api.transport.vehicles, refetchInterval: connected ? false : 3000 })
   const { data: stops } = useQuery({ queryKey: ['stops'], queryFn: api.transport.stops })
+
+  const createVehicleMut = useMutation({
+    mutationFn: (data: any) => api.transport.createVehicle(data),
+    onSuccess: () => {
+      toast.success('Vehicle added', { description: 'The new vehicle has been added to the fleet.' })
+      qc.invalidateQueries({ queryKey: ['vehicles'] })
+      setVehicleDialog(null)
+    },
+    onError: () => toast.error('Failed to add vehicle'),
+  })
+
+  const updateVehicleMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.transport.updateVehicle(id, data),
+    onSuccess: () => {
+      toast.success('Vehicle updated', { description: 'The vehicle record has been saved.' })
+      qc.invalidateQueries({ queryKey: ['vehicles'] })
+      setVehicleDialog(null)
+    },
+    onError: () => toast.error('Failed to update vehicle'),
+  })
+
+  const deleteVehicleMut = useMutation({
+    mutationFn: (id: string) => api.transport.deleteVehicle(id),
+    onSuccess: () => {
+      toast.success('Vehicle deleted', { description: 'The vehicle has been removed from the fleet.' })
+      qc.invalidateQueries({ queryKey: ['vehicles'] })
+      setVehicleDelete(null)
+      if (selectedId) setSelectedId(null)
+    },
+    onError: () => toast.error('Failed to delete vehicle'),
+  })
+
+  const createStopMut = useMutation({
+    mutationFn: (data: any) => api.transport.createStop(data),
+    onSuccess: () => {
+      toast.success('Stop added', { description: 'The new route stop has been created.' })
+      qc.invalidateQueries({ queryKey: ['stops'] })
+      setStopDialog(false)
+    },
+    onError: () => toast.error('Failed to add stop'),
+  })
+
+  const deleteStopMut = useMutation({
+    mutationFn: (id: string) => api.transport.deleteStop(id),
+    onSuccess: () => {
+      toast.success('Stop deleted', { description: 'The route stop has been removed.' })
+      qc.invalidateQueries({ queryKey: ['stops'] })
+      setStopDelete(null)
+    },
+    onError: () => toast.error('Failed to delete stop'),
+  })
 
   // Connect to live GPS tracker mini-service via socket.io (port 3003, XTransformPort)
   useEffect(() => {
@@ -67,6 +148,8 @@ export function TransportModule() {
   const moving = merged.filter(v => v.status === 'Moving').length
   const stopped = merged.filter(v => v.status === 'Stopped').length
   const selected = merged.find(v => v.id === selectedId) || merged[0]
+  // Original vehicle record (with all fields) for edit/delete operations
+  const selectedVehicle: Vehicle | undefined = (vehicles || []).find(v => v.id === selected?.id)
 
   return (
     <div className="space-y-5">
@@ -95,7 +178,14 @@ export function TransportModule() {
         {/* Vehicle list */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2"><Bus className="size-4 text-primary" /> Fleet Status</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2"><Bus className="size-4 text-primary" /> Fleet Status</CardTitle>
+              {canCreate && (
+                <Button size="sm" className="gap-1.5 h-8" onClick={() => setVehicleDialog({ mode: 'create' })}>
+                  <Plus className="size-3.5" /> <span className="hidden sm:inline">Add Vehicle</span><span className="sm:hidden">Add</span>
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <ScrollArea className="h-[420px]">
@@ -154,6 +244,23 @@ export function TransportModule() {
                 <Metric icon={Activity} label="Last Update" value={new Date(selected.lastUpdate).toLocaleTimeString('en-IN')} />
               </div>
               <div className="md:col-span-1 space-y-2">
+                {(canEdit || canDelete) && selectedVehicle && (
+                  <>
+                    <div className="flex gap-2">
+                      {canEdit && (
+                        <Button className="flex-1 gap-1.5" variant="outline" size="sm" onClick={() => setVehicleDialog({ mode: 'edit', target: selectedVehicle })}>
+                          <Pencil className="size-3.5" /> Edit
+                        </Button>
+                      )}
+                      {canDelete && (
+                        <Button className="flex-1 gap-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10" variant="outline" size="sm" onClick={() => setVehicleDelete(selectedVehicle)}>
+                          <Trash2 className="size-3.5" /> Delete
+                        </Button>
+                      )}
+                    </div>
+                    <Separator className="my-1" />
+                  </>
+                )}
                 <Button className="w-full" variant="outline" onClick={() => toast.info('Sending pickup notification to parents…')}><MapPin className="size-4 mr-1.5" /> Notify Pickup</Button>
                 <Button className="w-full" variant="outline" onClick={() => toast.info('Sending drop notification to parents…')}><Navigation className="size-4 mr-1.5" /> Notify Drop</Button>
                 <Button className="w-full" variant="outline" onClick={() => toast.info('ETA calculation requested…')}><Activity className="size-4 mr-1.5" /> Calculate ETA</Button>
@@ -167,27 +274,290 @@ export function TransportModule() {
 
       {/* Route stops table */}
       <Card>
-        <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Route Stops & Pickups</CardTitle></CardHeader>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-sm font-medium">Route Stops & Pickups</CardTitle>
+            {canCreate && (
+              <Button size="sm" className="gap-1.5 h-8" onClick={() => setStopDialog(true)}>
+                <Plus className="size-3.5" /> <span className="hidden sm:inline">Add Stop</span><span className="sm:hidden">Add</span>
+              </Button>
+            )}
+          </div>
+        </CardHeader>
         <CardContent className="p-0">
           <ScrollArea className="h-64">
             <div className="p-4 space-y-2">
-              {(stops || []).map(s => (
+              {(stops || []).length === 0 ? (
+                <div className="text-center text-xs text-muted-foreground py-8">No route stops configured.</div>
+              ) : (stops || []).map(s => (
                 <div key={s.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted">
                   <div className="size-2 rounded-full bg-primary" />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium">{s.name}</div>
-                    <div className="text-[11px] text-muted-foreground">{s.routeName}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{s.name}</div>
+                    <div className="text-[11px] text-muted-foreground truncate">{s.routeName}</div>
                   </div>
-                  <div className="text-xs text-muted-foreground">Pickup: {s.pickupTime}</div>
-                  <div className="text-xs text-muted-foreground">Drop: {s.dropTime}</div>
+                  <div className="text-xs text-muted-foreground hidden sm:block">Pickup: {s.pickupTime}</div>
+                  <div className="text-xs text-muted-foreground hidden sm:block">Drop: {s.dropTime}</div>
                   <Badge variant="outline" className="text-[10px]">₹{s.fare}</Badge>
+                  {canDelete && (
+                    <Button size="icon" variant="ghost" className="size-7 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 shrink-0" title="Delete stop" onClick={() => setStopDelete(s)}>
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
           </ScrollArea>
         </CardContent>
       </Card>
+
+      {vehicleDialog && (
+        <VehicleFormDialog
+          key={vehicleDialog.mode === 'edit' ? vehicleDialog.target?.id : 'create'}
+          mode={vehicleDialog.mode}
+          target={vehicleDialog.target}
+          loading={createVehicleMut.isPending || updateVehicleMut.isPending}
+          onClose={() => setVehicleDialog(null)}
+          onSubmit={(data) => {
+            if (vehicleDialog.mode === 'edit' && vehicleDialog.target) {
+              updateVehicleMut.mutate({ id: vehicleDialog.target.id, data })
+            } else {
+              createVehicleMut.mutate(data)
+            }
+          }}
+        />
+      )}
+
+      {vehicleDelete && (
+        <AlertDialog open onOpenChange={(o) => { if (!o) setVehicleDelete(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete vehicle?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete <strong>{vehicleDelete.vehicleNo}</strong> ({vehicleDelete.type || 'Vehicle'}) — Driver: {vehicleDelete.driverName}, Route: {vehicleDelete.routeName}. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => deleteVehicleMut.mutate(vehicleDelete.id)}
+                disabled={deleteVehicleMut.isPending}
+              >
+                {deleteVehicleMut.isPending ? 'Deleting…' : 'Yes, delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {stopDialog && (
+        <StopFormDialog
+          loading={createStopMut.isPending}
+          onClose={() => setStopDialog(false)}
+          onSubmit={(data) => createStopMut.mutate(data)}
+        />
+      )}
+
+      {stopDelete && (
+        <AlertDialog open onOpenChange={(o) => { if (!o) setStopDelete(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete stop?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete the <strong>{stopDelete.name}</strong> stop on route <strong>{stopDelete.routeName}</strong> (Pickup {stopDelete.pickupTime}, Drop {stopDelete.dropTime}, Fare ₹{stopDelete.fare}). This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => deleteStopMut.mutate(stopDelete.id)}
+                disabled={deleteStopMut.isPending}
+              >
+                {deleteStopMut.isPending ? 'Deleting…' : 'Yes, delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
+  )
+}
+
+// ============ Vehicle Create/Edit Dialog ============
+function VehicleFormDialog({
+  mode, target, loading, onClose, onSubmit,
+}: {
+  mode: 'create' | 'edit'
+  target?: Vehicle
+  loading: boolean
+  onClose: () => void
+  onSubmit: (data: any) => void
+}) {
+  const [vehicleNo, setVehicleNo] = useState(target?.vehicleNo ?? '')
+  const [type, setType] = useState(target?.type ?? 'Bus')
+  const [capacity, setCapacity] = useState(target ? String(target.capacity) : '45')
+  const [driverName, setDriverName] = useState(target?.driverName ?? '')
+  const [driverPhone, setDriverPhone] = useState(target?.driverPhone ?? '')
+  const [routeName, setRouteName] = useState(target?.routeName ?? '')
+
+  const valid = vehicleNo.trim() && driverName.trim() && routeName.trim() && Number(capacity) >= 1
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Bus className="size-4 text-primary" />
+            {mode === 'create' ? 'Add Vehicle' : 'Edit Vehicle'}
+          </DialogTitle>
+          <DialogDescription>
+            {mode === 'create' ? 'Register a new vehicle in the fleet. Fields marked with * are required.' : `Update details for ${target?.vehicleNo}.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="vh-no">Vehicle No. *</Label>
+              <Input id="vh-no" value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} placeholder="KA01 AB 1234" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Type</Label>
+              <Select value={type} onValueChange={setType}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {VEHICLE_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="vh-cap">Capacity *</Label>
+              <Input id="vh-cap" type="number" min="1" value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="45" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="vh-route">Route Name *</Label>
+              <Input id="vh-route" value={routeName} onChange={(e) => setRouteName(e.target.value)} placeholder="Route 7 — Indiranagar" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="vh-driver">Driver Name *</Label>
+              <Input id="vh-driver" value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="Mr. Suresh" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="vh-phone">Driver Phone</Label>
+              <Input id="vh-phone" value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} placeholder="+91 98765 43210" />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={!valid || loading}
+            onClick={() => onSubmit({
+              vehicleNo: vehicleNo.trim(),
+              type,
+              capacity: Number(capacity),
+              driverName: driverName.trim(),
+              driverPhone: driverPhone.trim() || undefined,
+              routeName: routeName.trim(),
+            })}
+          >
+            {loading ? 'Saving…' : mode === 'create' ? 'Create Vehicle' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============ Stop Create Dialog ============
+function StopFormDialog({
+  loading, onClose, onSubmit,
+}: {
+  loading: boolean
+  onClose: () => void
+  onSubmit: (data: any) => void
+}) {
+  const [name, setName] = useState('')
+  const [routeName, setRouteName] = useState('')
+  const [lat, setLat] = useState('')
+  const [lng, setLng] = useState('')
+  const [pickupTime, setPickupTime] = useState('07:00')
+  const [dropTime, setDropTime] = useState('15:30')
+  const [fare, setFare] = useState('0')
+
+  const valid = name.trim() && routeName.trim() && Number(lat) !== 0 && Number(lng) !== 0 && Number(fare) >= 0
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <MapPin className="size-4 text-primary" /> Add Route Stop
+          </DialogTitle>
+          <DialogDescription>
+            Define a pickup/drop stop with GPS coordinates and timing. Fields marked with * are required.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="st-name">Stop Name *</Label>
+              <Input id="st-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Indiranagar 100ft Rd" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="st-route">Route Name *</Label>
+              <Input id="st-route" value={routeName} onChange={(e) => setRouteName(e.target.value)} placeholder="Route 7 — Indiranagar" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="st-lat">Latitude *</Label>
+              <Input id="st-lat" type="number" step="any" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="12.9716" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="st-lng">Longitude *</Label>
+              <Input id="st-lng" type="number" step="any" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="77.6058" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="st-pickup">Pickup Time</Label>
+              <Input id="st-pickup" type="time" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="st-drop">Drop Time</Label>
+              <Input id="st-drop" type="time" value={dropTime} onChange={(e) => setDropTime(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="st-fare">Fare (₹) *</Label>
+            <Input id="st-fare" type="number" min="0" value={fare} onChange={(e) => setFare(e.target.value)} placeholder="1200" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={!valid || loading}
+            onClick={() => onSubmit({
+              name: name.trim(),
+              routeName: routeName.trim(),
+              lat: Number(lat),
+              lng: Number(lng),
+              pickupTime,
+              dropTime,
+              fare: Number(fare),
+            })}
+          >
+            {loading ? 'Saving…' : 'Add Stop'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

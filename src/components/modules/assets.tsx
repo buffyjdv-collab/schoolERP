@@ -1,15 +1,17 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { Asset } from '@/lib/types'
+import { useCan } from '@/lib/store'
 import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
 import {
   Card, CardContent, CardHeader, CardTitle,
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -19,7 +21,14 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@/components/ui/select'
 import {
-  Package, Wrench, IndianRupee, Search, Boxes, MapPin, User,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  Package, Wrench, IndianRupee, Search, Boxes, MapPin, User, Plus, Pencil, Trash2,
 } from 'lucide-react'
 import {
   BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -43,10 +52,13 @@ const CONDITION_LABEL: Record<string, string> = {
   'Under Repair': 'Under Repair',
 }
 
+const ASSET_CONDITIONS = ['Good', 'Damaged', 'Under Repair'] as const
+
 const CHART_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#f43f5e', '#8b5cf6', '#0ea5e9', '#84cc16', '#ec4899']
 
 // ============ Asset Row (flat view) ============
-function AssetRow({ a }: { a: Asset }) {
+function AssetRow({ a, canEdit, canDelete, onEdit, onDelete }: { a: Asset; canEdit: boolean; canDelete: boolean; onEdit: () => void; onDelete: () => void }) {
+  const canRowActions = canEdit || canDelete
   return (
     <TableRow
       className={`hover:bg-accent/50 cursor-pointer ${a.condition === 'Damaged' ? 'bg-rose-500/5' : a.condition === 'Under Repair' ? 'bg-amber-500/5' : ''}`}
@@ -65,18 +77,70 @@ function AssetRow({ a }: { a: Asset }) {
       <TableCell className="hidden sm:table-cell text-xs">
         {a.assignedTo ? <span className="inline-flex items-center gap-1"><User className="size-3" /> {a.assignedTo}</span> : <span className="text-muted-foreground">—</span>}
       </TableCell>
+      {canRowActions && (
+        <TableCell className="text-right" onClick={(ev) => ev.stopPropagation()}>
+          <div className="flex justify-end gap-1">
+            {canEdit && (
+              <Button size="icon" variant="ghost" className="size-7" title="Edit asset" onClick={onEdit}>
+                <Pencil className="size-3.5" />
+              </Button>
+            )}
+            {canDelete && (
+              <Button size="icon" variant="ghost" className="size-7 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10" title="Delete asset" onClick={onDelete}>
+                <Trash2 className="size-3.5" />
+              </Button>
+            )}
+          </div>
+        </TableCell>
+      )}
     </TableRow>
   )
 }
 
 // ============ Main module ============
 export function AssetsModule() {
+  const qc = useQueryClient()
+  const canCreate = useCan()('assets', 'create')
+  const canEdit = useCan()('assets', 'edit')
+  const canDelete = useCan()('assets', 'delete')
   const { data: assets, isLoading } = useQuery({ queryKey: ['assets', 'list'], queryFn: api.assets.list })
 
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('all')
   const [cond, setCond] = useState('all')
   const [groupByCat, setGroupByCat] = useState(false)
+  const [formDialog, setFormDialog] = useState<{ mode: 'create' | 'edit'; target?: Asset } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Asset | null>(null)
+
+  const createMut = useMutation({
+    mutationFn: (data: any) => api.assets.create(data),
+    onSuccess: () => {
+      toast.success('Asset added', { description: 'The new asset has been registered.' })
+      qc.invalidateQueries({ queryKey: ['assets', 'list'] })
+      setFormDialog(null)
+    },
+    onError: () => toast.error('Failed to add asset'),
+  })
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.assets.update(id, data),
+    onSuccess: () => {
+      toast.success('Asset updated', { description: 'The asset record has been saved.' })
+      qc.invalidateQueries({ queryKey: ['assets', 'list'] })
+      setFormDialog(null)
+    },
+    onError: () => toast.error('Failed to update asset'),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.assets.remove(id),
+    onSuccess: () => {
+      toast.success('Asset deleted', { description: 'The asset has been removed from the register.' })
+      qc.invalidateQueries({ queryKey: ['assets', 'list'] })
+      setDeleteTarget(null)
+    },
+    onError: () => toast.error('Failed to delete asset'),
+  })
 
   const categories = useMemo(() => Array.from(new Set((assets || []).map((a) => a.category))).sort(), [assets])
 
@@ -112,6 +176,8 @@ export function AssetsModule() {
     }
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))
   }, [filtered])
+
+  const canRowActions = canEdit || canDelete
 
   return (
     <div className="space-y-6">
@@ -194,6 +260,11 @@ export function AssetsModule() {
               >
                 <Boxes className="size-4" /> Group
               </Button>
+              {canCreate && (
+                <Button className="gap-1.5 shrink-0" onClick={() => setFormDialog({ mode: 'create' })}>
+                  <Plus className="size-4" /> <span className="hidden lg:inline">Add Asset</span><span className="lg:hidden">Add</span>
+                </Button>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -237,9 +308,25 @@ export function AssetsModule() {
                             </span>
                             <span className="text-xs font-semibold tabular-nums">{fmtINR(a.purchaseValue)}</span>
                           </div>
-                          {a.assignedTo && (
-                            <p className="text-[11px] text-muted-foreground mt-1 inline-flex items-center gap-1"><User className="size-3" /> {a.assignedTo}</p>
-                          )}
+                          <div className="flex items-center justify-between mt-1.5">
+                            {a.assignedTo ? (
+                              <p className="text-[11px] text-muted-foreground inline-flex items-center gap-1"><User className="size-3" /> {a.assignedTo}</p>
+                            ) : <span />}
+                            {canRowActions && (
+                              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                {canEdit && (
+                                  <Button size="icon" variant="ghost" className="size-6" title="Edit asset" onClick={() => setFormDialog({ mode: 'edit', target: a })}>
+                                    <Pencil className="size-3" />
+                                  </Button>
+                                )}
+                                {canDelete && (
+                                  <Button size="icon" variant="ghost" className="size-6 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10" title="Delete asset" onClick={() => setDeleteTarget(a)}>
+                                    <Trash2 className="size-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -259,14 +346,24 @@ export function AssetsModule() {
                     <TableHead className="text-right">Purchase Value</TableHead>
                     <TableHead>Condition</TableHead>
                     <TableHead className="hidden sm:table-cell">Assigned To</TableHead>
+                    {canRowActions && <TableHead className="text-right w-24">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((a) => <AssetRow key={a.id} a={a} />)}
+                  {filtered.map((a) => (
+                    <AssetRow
+                      key={a.id}
+                      a={a}
+                      canEdit={canEdit}
+                      canDelete={canDelete}
+                      onEdit={() => setFormDialog({ mode: 'edit', target: a })}
+                      onDelete={() => setDeleteTarget(a)}
+                    />
+                  ))}
                 </TableBody>
                 <TableFooter className="sticky bottom-0 bg-muted/50 backdrop-blur">
                   <TableRow className="font-semibold">
-                    <TableCell colSpan={7} className="text-sm">
+                    <TableCell colSpan={canRowActions ? 8 : 7} className="text-sm">
                       <div className="flex items-center justify-between gap-2">
                         <span>Total ({filtered.length} assets)</span>
                         <span className="font-bold tabular-nums">{fmtINR(filtered.reduce((s, a) => s + a.purchaseValue, 0))}</span>
@@ -279,6 +376,142 @@ export function AssetsModule() {
           )}
         </CardContent>
       </Card>
+
+      {formDialog && (
+        <AssetFormDialog
+          key={formDialog.mode === 'edit' ? formDialog.target?.id : 'create'}
+          mode={formDialog.mode}
+          target={formDialog.target}
+          categories={categories}
+          loading={createMut.isPending || updateMut.isPending}
+          onClose={() => setFormDialog(null)}
+          onSubmit={(data) => {
+            if (formDialog.mode === 'edit' && formDialog.target) {
+              updateMut.mutate({ id: formDialog.target.id, data })
+            } else {
+              createMut.mutate(data)
+            }
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <AlertDialog open onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete asset?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete <strong>{deleteTarget.name}</strong> ({deleteTarget.assetCode}) — {deleteTarget.category}, {fmtINR(deleteTarget.purchaseValue)}. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => deleteMut.mutate(deleteTarget.id)}
+                disabled={deleteMut.isPending}
+              >
+                {deleteMut.isPending ? 'Deleting…' : 'Yes, delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
+  )
+}
+
+// ============ Asset Create/Edit Dialog ============
+function AssetFormDialog({
+  mode, target, categories, loading, onClose, onSubmit,
+}: {
+  mode: 'create' | 'edit'
+  target?: Asset
+  categories: string[]
+  loading: boolean
+  onClose: () => void
+  onSubmit: (data: any) => void
+}) {
+  const [name, setName] = useState(target?.name ?? '')
+  const [category, setCategory] = useState(target?.category ?? (categories[0] || 'IT Equipment'))
+  const [location, setLocation] = useState(target?.location ?? '')
+  const [purchaseValue, setPurchaseValue] = useState(target ? String(target.purchaseValue) : '')
+  const [condition, setCondition] = useState<string>(target?.condition ?? 'Good')
+  const [assignedTo, setAssignedTo] = useState(target?.assignedTo ?? '')
+
+  const valid = name.trim() && category.trim() && Number(purchaseValue) >= 0
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Package className="size-4 text-primary" />
+            {mode === 'create' ? 'Add Asset' : 'Edit Asset'}
+          </DialogTitle>
+          <DialogDescription>
+            {mode === 'create' ? 'Register a new school asset. Fields marked with * are required.' : `Update details for ${target?.name}.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          <div className="space-y-1.5">
+            <Label htmlFor="as-name">Asset Name *</Label>
+            <Input id="as-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dell OptiPlex Desktop" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Category *</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select category" /></SelectTrigger>
+                <SelectContent>
+                  {Array.from(new Set([...categories, 'IT Equipment', 'Furniture', 'Lab Equipment', 'Library', 'Sports', 'Office'])).sort().map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="as-loc">Location</Label>
+              <Input id="as-loc" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Lab 2 / Staff Room" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="as-val">Purchase Value (₹) *</Label>
+              <Input id="as-val" type="number" min="0" value={purchaseValue} onChange={(e) => setPurchaseValue(e.target.value)} placeholder="25000" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Condition</Label>
+              <Select value={condition} onValueChange={setCondition}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ASSET_CONDITIONS.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="as-asg">Assigned To</Label>
+            <Input id="as-asg" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} placeholder="Mr. Ravi / Lab Assistant / —" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={!valid || loading}
+            onClick={() => onSubmit({
+              name: name.trim(),
+              category: category.trim(),
+              location: location.trim() || undefined,
+              purchaseValue: Number(purchaseValue),
+              condition,
+              assignedTo: assignedTo.trim() || undefined,
+            })}
+          >
+            {loading ? 'Saving…' : mode === 'create' ? 'Create Asset' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

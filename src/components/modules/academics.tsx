@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { ClassInfo, TimetableSlot } from '@/lib/types'
 import { SectionHeader, EmptyState } from '@/components/erp/primitives'
@@ -9,7 +9,9 @@ import {
   Card, CardContent, CardHeader, CardTitle,
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -19,10 +21,19 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@/components/ui/select'
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   GraduationCap, Users, BookOpen, Layers, School, Clock, MapPin,
-  UserCircle2, CalendarDays, Search, ChevronRight,
+  UserCircle2, CalendarDays, Search, ChevronRight, Plus, Pencil, Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
+import { useCan } from '@/lib/store'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
 
@@ -69,14 +80,47 @@ function ClassListItem({
 }
 
 // ============ Sections & Subjects tab ============
-function SectionsSubjectsTab({ cls }: { cls: ClassInfo }) {
+function SectionsSubjectsTab({ cls, canEdit }: { cls: ClassInfo; canEdit: boolean }) {
+  const qc = useQueryClient()
+  const [addSectionOpen, setAddSectionOpen] = useState(false)
+  const [addSubjectOpen, setAddSubjectOpen] = useState(false)
+
+  const addSectionMut = useMutation({
+    mutationFn: (data: { name: string; capacity: number; teacherId: string }) =>
+      api.academics.addSection(cls.id, data),
+    onSuccess: () => {
+      toast.success('Section added')
+      qc.invalidateQueries({ queryKey: ['academics', 'classes'] })
+      setAddSectionOpen(false)
+    },
+    onError: (e: any) => toast.error('Failed to add section: ' + e.message),
+  })
+
+  const addSubjectMut = useMutation({
+    mutationFn: (data: { name: string; code: string; teacherId: string }) =>
+      api.academics.addSubject(cls.id, data),
+    onSuccess: () => {
+      toast.success('Subject added')
+      qc.invalidateQueries({ queryKey: ['academics', 'classes'] })
+      setAddSubjectOpen(false)
+    },
+    onError: (e: any) => toast.error('Failed to add subject: ' + e.message),
+  })
+
   return (
     <div className="space-y-6">
       {/* Sections grid */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold flex items-center gap-2"><Layers className="size-4 text-primary" /> Sections</h3>
-          <Badge variant="secondary" className="text-[11px]">{cls.sections.length} section{cls.sections.length !== 1 ? 's' : ''}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-[11px]">{cls.sections.length} section{cls.sections.length !== 1 ? 's' : ''}</Badge>
+            {canEdit && (
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setAddSectionOpen(true)}>
+                <Plus className="size-3.5" /> Add Section
+              </Button>
+            )}
+          </div>
         </div>
         {cls.sections.length === 0 ? (
           <EmptyState icon={Layers} title="No sections" description="No sections have been created for this class yet." />
@@ -113,7 +157,7 @@ function SectionsSubjectsTab({ cls }: { cls: ClassInfo }) {
                     </div>
                     <div className="flex items-center justify-between text-xs pt-1">
                       <span className="text-muted-foreground inline-flex items-center gap-1.5"><UserCircle2 className="size-3.5" /> Class Teacher</span>
-                      <span className="font-medium text-right truncate max-w-[60%]">{s.teacherName || 'Not assigned'}</span>
+                      <span className="font-medium text-right truncate max-w-[60%]">{s.teacherName || s.teacherId || 'Not assigned'}</span>
                     </div>
                   </div>
                 </Card>
@@ -127,7 +171,14 @@ function SectionsSubjectsTab({ cls }: { cls: ClassInfo }) {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold flex items-center gap-2"><BookOpen className="size-4 text-primary" /> Subjects</h3>
-          <Badge variant="secondary" className="text-[11px]">{cls.subjects.length} subject{cls.subjects.length !== 1 ? 's' : ''}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-[11px]">{cls.subjects.length} subject{cls.subjects.length !== 1 ? 's' : ''}</Badge>
+            {canEdit && (
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setAddSubjectOpen(true)}>
+                <Plus className="size-3.5" /> Add Subject
+              </Button>
+            )}
+          </div>
         </div>
         <Card className="p-0 overflow-hidden">
           {cls.subjects.length === 0 ? (
@@ -148,10 +199,10 @@ function SectionsSubjectsTab({ cls }: { cls: ClassInfo }) {
                       <TableCell className="pl-6 font-medium text-sm">{s.name}</TableCell>
                       <TableCell><Badge variant="outline" className="text-[11px] tabular-nums">{s.code}</Badge></TableCell>
                       <TableCell className="pr-6 text-sm">
-                        {s.teacherName ? (
+                        {s.teacherName || s.teacherId ? (
                           <span className="inline-flex items-center gap-1.5">
                             <UserCircle2 className="size-3.5 text-muted-foreground" />
-                            {s.teacherName}
+                            {s.teacherName || s.teacherId}
                           </span>
                         ) : (
                           <span className="text-muted-foreground italic">Not assigned</span>
@@ -165,18 +216,201 @@ function SectionsSubjectsTab({ cls }: { cls: ClassInfo }) {
           )}
         </Card>
       </div>
+
+      <AddSectionDialog
+        open={addSectionOpen}
+        onOpenChange={setAddSectionOpen}
+        onSubmit={(d) => addSectionMut.mutate(d)}
+        loading={addSectionMut.isPending}
+      />
+      <AddSubjectDialog
+        open={addSubjectOpen}
+        onOpenChange={setAddSubjectOpen}
+        onSubmit={(d) => addSubjectMut.mutate(d)}
+        loading={addSubjectMut.isPending}
+      />
     </div>
+  )
+}
+
+// ============ Add Section dialog ============
+function AddSectionDialog({ open, onOpenChange, onSubmit, loading }: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  onSubmit: (d: { name: string; capacity: number; teacherId: string }) => void
+  loading: boolean
+}) {
+  const [form, setForm] = useState({ name: '', capacity: '40', teacherId: '' })
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Section</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 py-2">
+          <div>
+            <Label>Section Name *</Label>
+            <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. A, B, C" />
+          </div>
+          <div>
+            <Label>Capacity</Label>
+            <Input type="number" min="1" value={form.capacity} onChange={e => set('capacity', e.target.value)} />
+          </div>
+          <div className="col-span-2">
+            <Label>Teacher ID (optional)</Label>
+            <Input value={form.teacherId} onChange={e => set('teacherId', e.target.value)} placeholder="Class teacher's employee ID" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            disabled={!form.name.trim() || loading}
+            onClick={() => onSubmit({ name: form.name.trim(), capacity: Number(form.capacity) || 40, teacherId: form.teacherId.trim() })}
+          >
+            {loading ? 'Adding…' : 'Add Section'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============ Add Subject dialog ============
+function AddSubjectDialog({ open, onOpenChange, onSubmit, loading }: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  onSubmit: (d: { name: string; code: string; teacherId: string }) => void
+  loading: boolean
+}) {
+  const [form, setForm] = useState({ name: '', code: '', teacherId: '' })
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Subject</DialogTitle>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 py-2">
+          <div>
+            <Label>Subject Name *</Label>
+            <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Mathematics" />
+          </div>
+          <div>
+            <Label>Code</Label>
+            <Input value={form.code} onChange={e => set('code', e.target.value)} placeholder="auto if blank" />
+          </div>
+          <div className="col-span-2">
+            <Label>Teacher ID (optional)</Label>
+            <Input value={form.teacherId} onChange={e => set('teacherId', e.target.value)} placeholder="Subject teacher's employee ID" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            disabled={!form.name.trim() || loading}
+            onClick={() => onSubmit({ name: form.name.trim(), code: form.code.trim(), teacherId: form.teacherId.trim() })}
+          >
+            {loading ? 'Adding…' : 'Add Subject'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============ Add Class dialog ============
+function AddClassDialog({ open, onOpenChange, onSubmit, loading }: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  onSubmit: (name: string) => void
+  loading: boolean
+}) {
+  const [name, setName] = useState('')
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Class</DialogTitle>
+        </DialogHeader>
+        <div className="py-2 space-y-1.5">
+          <Label>Class Name *</Label>
+          <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Class 11, Nursery, LKG" />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button disabled={!name.trim() || loading} onClick={() => onSubmit(name.trim())}>
+            {loading ? 'Adding…' : 'Add Class'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============ Edit Class dialog (rename) ============
+function EditClassDialog({ open, onOpenChange, cls, onSubmit, loading }: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  cls: ClassInfo | null
+  onSubmit: (id: string, name: string) => void
+  loading: boolean
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Rename Class</DialogTitle>
+        </DialogHeader>
+        {cls && (
+          <EditClassForm
+            key={cls.id}
+            cls={cls}
+            onSubmit={onSubmit}
+            loading={loading}
+            onCancel={() => onOpenChange(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EditClassForm({ cls, onSubmit, loading, onCancel }: {
+  cls: ClassInfo
+  onSubmit: (id: string, name: string) => void
+  loading: boolean
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(cls.name)
+  return (
+    <>
+      <div className="py-2 space-y-1.5">
+        <Label>Class Name *</Label>
+        <Input value={name} onChange={e => setName(e.target.value)} />
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button disabled={!name.trim() || loading} onClick={() => onSubmit(cls.id, name.trim())}>
+          {loading ? 'Saving…' : 'Save Changes'}
+        </Button>
+      </DialogFooter>
+    </>
   )
 }
 
 // ============ Timetable grid ============
 function TimetableGrid({
-  slots, className, sectionName, sectionSelector,
+  slots, className, sectionName, sectionSelector, canDelete, onSlotClick,
 }: {
   slots: TimetableSlot[]
   className: string
   sectionName: string
   sectionSelector: React.ReactNode
+  canDelete: boolean
+  onSlotClick: (slot: TimetableSlot) => void
 }) {
   // Index by day + period for fast lookup. If multiple sections contribute,
   // the first one wins (cells display the chosen section's slot).
@@ -210,7 +444,10 @@ function TimetableGrid({
       <CardHeader className="pb-3 pt-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle className="text-base flex items-center gap-2"><CalendarDays className="size-4 text-primary" /> Weekly Timetable · {className}{sectionName && <span className="text-muted-foreground font-normal">· Section {sectionName}</span>}</CardTitle>
-          {sectionSelector}
+          <div className="flex items-center gap-3">
+            {canDelete && <span className="text-[11px] text-muted-foreground hidden sm:inline">Click a slot to manage</span>}
+            {sectionSelector}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="px-0 pb-0">
@@ -236,7 +473,15 @@ function TimetableGrid({
                     return (
                       <TableCell key={d} className="align-top p-2">
                         {slot ? (
-                          <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5 hover:border-primary/40 transition-colors">
+                          <button
+                            type="button"
+                            disabled={!canDelete}
+                            onClick={() => canDelete && onSlotClick(slot)}
+                            className={cn(
+                              'w-full text-left rounded-lg border border-primary/20 bg-primary/5 p-2.5 transition-colors',
+                              canDelete ? 'cursor-pointer hover:border-rose-400 hover:bg-rose-500/5' : 'cursor-default'
+                            )}
+                          >
                             <p className="font-semibold text-sm text-primary truncate">{slot.subjectName}</p>
                             <p className="text-[11px] text-muted-foreground truncate inline-flex items-center gap-1 mt-0.5">
                               <UserCircle2 className="size-3" /> {slot.teacherName}
@@ -245,7 +490,12 @@ function TimetableGrid({
                               {slot.room && <span className="inline-flex items-center gap-0.5"><MapPin className="size-3" />{slot.room}</span>}
                               <span className="inline-flex items-center gap-0.5"><Clock className="size-3" />{slot.startTime}</span>
                             </div>
-                          </div>
+                            {canDelete && (
+                              <span className="inline-flex items-center gap-1 mt-1.5 text-[10px] text-rose-600/70 dark:text-rose-400/70">
+                                <Trash2 className="size-2.5" /> click to delete
+                              </span>
+                            )}
+                          </button>
                         ) : (
                           <div className="rounded-lg border border-dashed border-border/60 p-2.5 text-center">
                             <span className="text-[11px] text-muted-foreground/60">—</span>
@@ -266,10 +516,59 @@ function TimetableGrid({
 
 // ============ Main module ============
 export function AcademicsModule() {
+  const qc = useQueryClient()
+  const canCreate = useCan()('academics', 'create')
+  const canEdit = useCan()('academics', 'edit')
+  const canDelete = useCan()('academics', 'delete')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [tab, setTab] = useState('sections')
   const [q, setQ] = useState('')
   const [sectionFilter, setSectionFilter] = useState<string>('all')
+  const [addClassOpen, setAddClassOpen] = useState(false)
+  const [editClassOpen, setEditClassOpen] = useState(false)
+  const [deleteClassOpen, setDeleteClassOpen] = useState(false)
+  const [deleteSlotTarget, setDeleteSlotTarget] = useState<TimetableSlot | null>(null)
+
+  const createClassMut = useMutation({
+    mutationFn: (name: string) => api.academics.createClass({ name }),
+    onSuccess: () => {
+      toast.success('Class created')
+      qc.invalidateQueries({ queryKey: ['academics', 'classes'] })
+      setAddClassOpen(false)
+    },
+    onError: (e: any) => toast.error('Failed to create class: ' + e.message),
+  })
+
+  const updateClassMut = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.academics.updateClass(id, { name }),
+    onSuccess: () => {
+      toast.success('Class renamed')
+      qc.invalidateQueries({ queryKey: ['academics', 'classes'] })
+      setEditClassOpen(false)
+    },
+    onError: (e: any) => toast.error('Failed to rename class: ' + e.message),
+  })
+
+  const deleteClassMut = useMutation({
+    mutationFn: (id: string) => api.academics.deleteClass(id),
+    onSuccess: () => {
+      toast.success('Class deleted')
+      qc.invalidateQueries({ queryKey: ['academics', 'classes'] })
+      setDeleteClassOpen(false)
+      setSelectedId(null)
+    },
+    onError: (e: any) => toast.error('Failed to delete class: ' + e.message),
+  })
+
+  const deleteSlotMut = useMutation({
+    mutationFn: (id: string) => api.academics.deleteSlot(id),
+    onSuccess: () => {
+      toast.success('Timetable slot removed')
+      qc.invalidateQueries({ queryKey: ['academics', 'timetable'] })
+      setDeleteSlotTarget(null)
+    },
+    onError: (e: any) => toast.error('Failed to delete slot: ' + e.message),
+  })
 
   const classesQ = useQuery({ queryKey: ['academics', 'classes'], queryFn: api.academics.classes })
   const classes = classesQ.data ?? []
@@ -315,7 +614,14 @@ export function AcademicsModule() {
         <div className="lg:col-span-1 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold flex items-center gap-2"><School className="size-4 text-primary" /> Classes</h3>
-            <Badge variant="secondary" className="text-[11px]">{classes.length}</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-[11px]">{classes.length}</Badge>
+              {canCreate && (
+                <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setAddClassOpen(true)}>
+                  <Plus className="size-3.5" /> Add
+                </Button>
+              )}
+            </div>
           </div>
           <div className="relative">
             <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -369,21 +675,37 @@ export function AcademicsModule() {
                       <p className="text-xs text-muted-foreground">Academic Year 2026–27</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4 text-sm">
-                    <div className="text-center">
-                      <p className="font-bold tabular-nums">{effectiveSelected.studentCount}</p>
-                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Students</p>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center gap-4 text-sm">
+                      <div className="text-center">
+                        <p className="font-bold tabular-nums">{effectiveSelected.studentCount}</p>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Students</p>
+                      </div>
+                      <div className="size-8 border-l" />
+                      <div className="text-center">
+                        <p className="font-bold tabular-nums">{effectiveSelected.sections.length}</p>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Sections</p>
+                      </div>
+                      <div className="size-8 border-l" />
+                      <div className="text-center">
+                        <p className="font-bold tabular-nums">{effectiveSelected.subjectCount}</p>
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Subjects</p>
+                      </div>
                     </div>
-                    <div className="size-8 border-l" />
-                    <div className="text-center">
-                      <p className="font-bold tabular-nums">{effectiveSelected.sections.length}</p>
-                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Sections</p>
-                    </div>
-                    <div className="size-8 border-l" />
-                    <div className="text-center">
-                      <p className="font-bold tabular-nums">{effectiveSelected.subjectCount}</p>
-                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Subjects</p>
-                    </div>
+                    {(canEdit || canDelete) && (
+                      <div className="flex items-center gap-1.5">
+                        {canEdit && (
+                          <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => setEditClassOpen(true)}>
+                            <Pencil className="size-3.5" /> Rename
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button size="sm" variant="destructive" className="h-8 gap-1.5" onClick={() => setDeleteClassOpen(true)}>
+                            <Trash2 className="size-3.5" /> Delete
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -395,7 +717,7 @@ export function AcademicsModule() {
                 </TabsList>
 
                 <TabsContent value="sections" className="mt-4">
-                  <SectionsSubjectsTab cls={effectiveSelected} />
+                  <SectionsSubjectsTab cls={effectiveSelected} canEdit={canEdit} />
                 </TabsContent>
 
                 <TabsContent value="timetable" className="mt-4">
@@ -408,6 +730,8 @@ export function AcademicsModule() {
                       slots={timetableQ.data ?? []}
                       className={effectiveSelected.name}
                       sectionName={activeSectionObj?.name ?? ''}
+                      canDelete={canDelete}
+                      onSlotClick={(slot) => setDeleteSlotTarget(slot)}
                       sectionSelector={
                         <Select value={effectiveSectionFilter} onValueChange={setSectionFilter}>
                           <SelectTrigger size="sm" className="w-44">
@@ -429,6 +753,72 @@ export function AcademicsModule() {
           )}
         </div>
       </div>
+
+      {canCreate && (
+        <AddClassDialog
+          open={addClassOpen}
+          onOpenChange={setAddClassOpen}
+          onSubmit={(name) => createClassMut.mutate(name)}
+          loading={createClassMut.isPending}
+        />
+      )}
+      {canEdit && (
+        <EditClassDialog
+          open={editClassOpen}
+          onOpenChange={setEditClassOpen}
+          cls={effectiveSelected}
+          onSubmit={(id, name) => updateClassMut.mutate({ id, name })}
+          loading={updateClassMut.isPending}
+        />
+      )}
+      {canDelete && (
+        <AlertDialog open={deleteClassOpen} onOpenChange={setDeleteClassOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete class?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete {effectiveSelected?.name ?? 'this class'} along with its sections, subjects and timetable slots. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                disabled={deleteClassMut.isPending}
+                onClick={() => effectiveSelected && deleteClassMut.mutate(effectiveSelected.id)}
+              >
+                {deleteClassMut.isPending ? 'Deleting…' : 'Yes, delete class'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+      {canDelete && (
+        <AlertDialog open={!!deleteSlotTarget} onOpenChange={(o) => !o && setDeleteSlotTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete timetable slot?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {deleteSlotTarget ? (
+                  <span>
+                    Remove <span className="font-medium text-foreground">{deleteSlotTarget.subjectName}</span> ({deleteSlotTarget.day} · P{deleteSlotTarget.period} · {deleteSlotTarget.startTime}) taught by {deleteSlotTarget.teacherName}.
+                  </span>
+                ) : 'This slot will be removed from the weekly timetable.'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                disabled={deleteSlotMut.isPending}
+                onClick={() => deleteSlotTarget && deleteSlotMut.mutate(deleteSlotTarget.id)}
+              >
+                {deleteSlotMut.isPending ? 'Deleting…' : 'Delete this slot'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   )
 }

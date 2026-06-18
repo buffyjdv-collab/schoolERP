@@ -3,10 +3,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
-import type { FeeInvoice } from '@/lib/types'
+import type { FeeInvoice, FeeStructure, Student, ClassInfo } from '@/lib/types'
 import {
   Wallet, TrendingUp, TrendingDown, AlertTriangle, Search, Download,
   IndianRupee, FileText, Receipt, CheckCircle2, CreditCard, Banknote, Smartphone, Building2,
+  Pencil, Trash2, Plus,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -21,6 +22,10 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -40,14 +45,24 @@ function fmtINR(n: number) {
 const PIE_COLORS = ['#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#0ea5e9']
 const METHOD_ICONS: Record<string, any> = { Cash: Banknote, Card: CreditCard, Online: Smartphone, UPI: Smartphone }
 
+const FREQUENCIES = ['Annual', 'Term', 'Monthly', 'OneTime'] as const
+
 export function FeesModule() {
   const canCollect = useCan()('fees', 'collect')
   const canPay = useCan()('fees', 'pay')
   const canCreate = useCan()('fees', 'create')
+  const canEdit = useCan()('fees', 'edit')
+  const canDelete = useCan()('fees', 'delete')
   const [tab, setTab] = useState('invoices')
   const [statusFilter, setStatusFilter] = useState('all')
   const [q, setQ] = useState('')
   const [payInvoice, setPayInvoice] = useState<FeeInvoice | null>(null)
+
+  // CRUD UI state
+  const [structDialog, setStructDialog] = useState<{ mode: 'create' | 'edit'; target?: FeeStructure } | null>(null)
+  const [structDelete, setStructDelete] = useState<FeeStructure | null>(null)
+  const [createInvOpen, setCreateInvOpen] = useState(false)
+  const [invDelete, setInvDelete] = useState<FeeInvoice | null>(null)
 
   const qc = useQueryClient()
   const { data: summary, isLoading: sumLoading } = useQuery({ queryKey: ['fee-summary'], queryFn: api.fees.summary })
@@ -56,11 +71,41 @@ export function FeesModule() {
     queryKey: ['invoices', statusFilter, q],
     queryFn: () => api.fees.invoices({ ...(statusFilter !== 'all' ? { status: statusFilter } : {}), ...(q ? { q } : {}) }),
   })
+  // For Create/Edit dialogs (only fetched when an admin can act)
+  const { data: classes } = useQuery({ queryKey: ['classes'], queryFn: api.academics.classes })
+  const { data: students } = useQuery({ queryKey: ['students', 'list', 'fees-crud'], queryFn: () => api.students.list() })
 
   const payMut = useMutation({
     mutationFn: ({ id, data }: { id: string; data: { paidAmount: number; paymentMethod: string } }) => api.fees.collect(id, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['invoices'] }); qc.invalidateQueries({ queryKey: ['fee-summary'] }); toast.success('Payment recorded successfully'); setPayInvoice(null) },
     onError: (e: any) => toast.error('Payment failed: ' + e.message),
+  })
+
+  // ============ CRUD mutations ============
+  const createStructMut = useMutation({
+    mutationFn: (data: any) => api.fees.createStructure(data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fee-structures'] }); toast.success('Fee structure created'); setStructDialog(null) },
+    onError: (e: any) => toast.error('Failed to create: ' + e.message),
+  })
+  const updateStructMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.fees.updateStructure(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fee-structures'] }); toast.success('Fee structure updated'); setStructDialog(null) },
+    onError: (e: any) => toast.error('Failed to update: ' + e.message),
+  })
+  const deleteStructMut = useMutation({
+    mutationFn: (id: string) => api.fees.deleteStructure(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fee-structures'] }); toast.success('Fee structure deleted'); setStructDelete(null) },
+    onError: (e: any) => toast.error('Failed to delete: ' + e.message),
+  })
+  const createInvMut = useMutation({
+    mutationFn: (data: { studentId: string; feeStructureId: string }) => api.fees.createInvoice(data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['invoices'] }); qc.invalidateQueries({ queryKey: ['fee-summary'] }); toast.success('Invoice created'); setCreateInvOpen(false) },
+    onError: (e: any) => toast.error('Failed to create invoice: ' + e.message),
+  })
+  const deleteInvMut = useMutation({
+    mutationFn: (id: string) => api.fees.deleteInvoice(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['invoices'] }); qc.invalidateQueries({ queryKey: ['fee-summary'] }); toast.success('Invoice deleted'); setInvDelete(null) },
+    onError: (e: any) => toast.error('Failed to delete invoice: ' + e.message),
   })
 
   const collectionRate = summary ? Math.round((summary.collected / (summary.collected + summary.pending)) * 100) : 0
@@ -140,6 +185,11 @@ export function FeesModule() {
                   <SelectItem value="Overdue">Overdue</SelectItem>
                 </SelectContent>
               </Select>
+              {canCreate && (
+                <Button size="sm" className="h-10 gap-1.5" onClick={() => setCreateInvOpen(true)}>
+                  <Plus className="size-4" /> Create Invoice
+                </Button>
+              )}
               <Button variant="outline" size="sm" className="h-10 gap-1.5" onClick={() => toast.info('Exporting invoices to CSV…')}><Download className="size-4" /> Export</Button>
             </div>
             <div className="rounded-lg border max-h-[55vh] overflow-y-auto scroll-thin">
@@ -170,13 +220,20 @@ export function FeesModule() {
                       <TableCell className="text-right tabular-nums text-sm font-medium">{inv.balance > 0 ? `₹${inv.balance.toLocaleString('en-IN')}` : '—'}</TableCell>
                       <TableCell><StatusBadge status={inv.status} /></TableCell>
                       <TableCell className="text-right">
-                        {inv.status !== 'Paid' ? (
-                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPayInvoice(inv)}>
-                            <IndianRupee className="size-3" /> {(canCollect || canPay) ? (canPay && !canCollect ? 'Pay' : 'Collect') : 'View'}
-                          </Button>
-                        ) : (
-                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => toast.info(`Receipt ${inv.invoiceNo} ready`)}>Receipt</Button>
-                        )}
+                        <div className="inline-flex items-center gap-1.5">
+                          {inv.status !== 'Paid' ? (
+                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPayInvoice(inv)}>
+                              <IndianRupee className="size-3" /> {(canCollect || canPay) ? (canPay && !canCollect ? 'Pay' : 'Collect') : 'View'}
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => toast.info(`Receipt ${inv.invoiceNo} ready`)}>Receipt</Button>
+                          )}
+                          {canDelete && (
+                            <Button size="icon" variant="ghost" className="size-7 text-rose-600 hover:bg-rose-500/10" title="Delete invoice" onClick={() => setInvDelete(inv)}>
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -221,10 +278,25 @@ export function FeesModule() {
         {/* Fee structures tab */}
         <TabsContent value="structures" className="mt-4">
           <Card><CardContent className="p-4">
-            <SectionHeader title="Fee Structure by Class" description="Annual fee configuration for academic year 2026-27" action={canCreate ? <Button size="sm" variant="outline" onClick={() => toast.info('Open fee structure editor')}><FileText className="size-4 mr-1.5" /> Add Structure</Button> : undefined} />
+            <SectionHeader
+              title="Fee Structure by Class"
+              description="Annual fee configuration for academic year 2026-27"
+              action={canCreate ? (
+                <Button size="sm" variant="outline" onClick={() => setStructDialog({ mode: 'create' })}>
+                  <FileText className="size-4 mr-1.5" /> Add Structure
+                </Button>
+              ) : undefined}
+            />
             <div className="rounded-lg border overflow-hidden">
               <Table>
-                <TableHeader><TableRow><TableHead>Class</TableHead><TableHead>Fee Type</TableHead><TableHead>Frequency</TableHead><TableHead className="text-right">Amount</TableHead><TableHead>Due Date</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow>
+                  <TableHead>Class</TableHead>
+                  <TableHead>Fee Type</TableHead>
+                  <TableHead>Frequency</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Due Date</TableHead>
+                  {(canEdit || canDelete) && <TableHead className="text-right">Actions</TableHead>}
+                </TableRow></TableHeader>
                 <TableBody>
                   {(structures || []).map(s => (
                     <TableRow key={s.id}>
@@ -233,6 +305,22 @@ export function FeesModule() {
                       <TableCell><Badge variant="secondary" className="text-[10px]">{s.frequency}</Badge></TableCell>
                       <TableCell className="text-right tabular-nums font-medium">₹{s.amount.toLocaleString('en-IN')}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{s.dueDate ? new Date(s.dueDate).toLocaleDateString('en-IN') : '—'}</TableCell>
+                      {(canEdit || canDelete) && (
+                        <TableCell className="text-right">
+                          <div className="inline-flex items-center gap-1">
+                            {canEdit && (
+                              <Button size="icon" variant="ghost" className="size-7" title="Edit structure" onClick={() => setStructDialog({ mode: 'edit', target: s })}>
+                                <Pencil className="size-3.5" />
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button size="icon" variant="ghost" className="size-7 text-rose-600 hover:bg-rose-500/10" title="Delete structure" onClick={() => setStructDelete(s)}>
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -292,6 +380,79 @@ export function FeesModule() {
       </Tabs>
 
       {payInvoice && <PaymentDialog invoice={payInvoice} onClose={() => setPayInvoice(null)} onPay={(amount, method) => payMut.mutate({ id: payInvoice.id, data: { paidAmount: amount, paymentMethod: method } })} loading={payMut.isPending} />}
+
+      {structDialog && (
+        <FeeStructureDialog
+          mode={structDialog.mode}
+          target={structDialog.target}
+          classes={classes ?? []}
+          loading={createStructMut.isPending || updateStructMut.isPending}
+          onClose={() => setStructDialog(null)}
+          onSubmit={(data) => {
+            if (structDialog.mode === 'edit' && structDialog.target) {
+              updateStructMut.mutate({ id: structDialog.target.id, data })
+            } else {
+              createStructMut.mutate(data)
+            }
+          }}
+        />
+      )}
+
+      {structDelete && (
+        <AlertDialog open onOpenChange={(o) => { if (!o) setStructDelete(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete fee structure?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete the <strong>{structDelete.name}</strong> fee structure for <strong>{structDelete.className}</strong> ({structDelete.frequency}, ₹{structDelete.amount.toLocaleString('en-IN')}). Existing invoices will not be affected, but no new invoices can be generated from this structure. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => deleteStructMut.mutate(structDelete.id)}
+                disabled={deleteStructMut.isPending}
+              >
+                {deleteStructMut.isPending ? 'Deleting…' : 'Yes, delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {createInvOpen && (
+        <CreateInvoiceDialog
+          students={students ?? []}
+          structures={structures ?? []}
+          loading={createInvMut.isPending}
+          onClose={() => setCreateInvOpen(false)}
+          onSubmit={(data) => createInvMut.mutate(data)}
+        />
+      )}
+
+      {invDelete && (
+        <AlertDialog open onOpenChange={(o) => { if (!o) setInvDelete(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete invoice?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete invoice <strong className="font-mono">{invDelete.invoiceNo}</strong> for <strong>{invDelete.studentName}</strong> (₹{invDelete.amount.toLocaleString('en-IN')}, {invDelete.status}). This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => deleteInvMut.mutate(invDelete.id)}
+                disabled={deleteInvMut.isPending}
+              >
+                {deleteInvMut.isPending ? 'Deleting…' : 'Yes, delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   )
 }
@@ -344,6 +505,187 @@ function PaymentDialog({ invoice, onClose, onPay, loading }: { invoice: FeeInvoi
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button disabled={!amount || Number(amount) <= 0 || loading} onClick={() => onPay(Number(amount), method)}>
             {loading ? 'Processing…' : `Collect ₹${Number(amount).toLocaleString('en-IN')}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============================================================
+// Fee Structure Create / Edit dialog
+// ============================================================
+function FeeStructureDialog({
+  mode, target, classes, loading, onClose, onSubmit,
+}: {
+  mode: 'create' | 'edit'
+  target?: FeeStructure
+  classes: ClassInfo[]
+  loading: boolean
+  onClose: () => void
+  onSubmit: (data: { name: string; classId: string; amount: number; frequency: string; dueDate?: string }) => void
+}) {
+  const [name, setName] = useState(target?.name ?? '')
+  const [classId, setClassId] = useState(target?.classId ?? '')
+  const [amount, setAmount] = useState(target ? String(target.amount) : '')
+  const [frequency, setFrequency] = useState(target?.frequency ?? 'Annual')
+  const [dueDate, setDueDate] = useState(target?.dueDate ? target.dueDate.slice(0, 10) : '')
+
+  const valid = name.trim() && classId && Number(amount) > 0
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="size-5 text-primary" />
+            {mode === 'create' ? 'Add Fee Structure' : 'Edit Fee Structure'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="fs-name">Fee Name</Label>
+            <Input id="fs-name" placeholder="e.g. Tuition Fee, Transport Fee" value={name} onChange={e => setName(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Class</Label>
+            <Select value={classId} onValueChange={setClassId}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select class" /></SelectTrigger>
+              <SelectContent>
+                {classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="fs-amount">Amount (₹)</Label>
+              <Input id="fs-amount" type="number" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Frequency</Label>
+              <Select value={frequency} onValueChange={setFrequency}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {FREQUENCIES.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="fs-due">Due Date (optional)</Label>
+            <Input id="fs-due" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={!valid || loading}
+            onClick={() => onSubmit({
+              name: name.trim(),
+              classId,
+              amount: Number(amount),
+              frequency,
+              ...(dueDate ? { dueDate } : {}),
+            })}
+          >
+            {loading ? 'Saving…' : mode === 'create' ? 'Create Structure' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============================================================
+// Create Invoice dialog (student picker + fee structure picker)
+// ============================================================
+function CreateInvoiceDialog({
+  students, structures, loading, onClose, onSubmit,
+}: {
+  students: Student[]
+  structures: FeeStructure[]
+  loading: boolean
+  onClose: () => void
+  onSubmit: (data: { studentId: string; feeStructureId: string }) => void
+}) {
+  const [studentId, setStudentId] = useState('')
+  const [feeStructureId, setFeeStructureId] = useState('')
+  const [q, setQ] = useState('')
+
+  const filteredStudents = (students || []).filter(s => {
+    if (!q) return true
+    const t = q.toLowerCase()
+    return s.fullName.toLowerCase().includes(t) || s.admissionNo.toLowerCase().includes(t) || (s.className ?? '').toLowerCase().includes(t)
+  })
+
+  const valid = studentId && feeStructureId
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Receipt className="size-5 text-primary" /> Create Invoice
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          {/* Student picker (searchable) */}
+          <div className="space-y-1.5">
+            <Label>Student</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by name, admission no, class…"
+                value={q}
+                onChange={e => setQ(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Select value={studentId} onValueChange={setStudentId}>
+              <SelectTrigger className="w-full"><SelectValue placeholder={filteredStudents.length ? 'Select a student' : 'No students found'} /></SelectTrigger>
+              <SelectContent>
+                {filteredStudents.slice(0, 100).map(s => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.fullName} · {s.admissionNo} · {s.className ?? '-'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Fee structure picker */}
+          <div className="space-y-1.5">
+            <Label>Fee Structure</Label>
+            <Select value={feeStructureId} onValueChange={setFeeStructureId}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select fee structure" /></SelectTrigger>
+              <SelectContent>
+                {(structures || []).map(s => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name} · {s.className} · ₹{s.amount.toLocaleString('en-IN')} ({s.frequency})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {studentId && feeStructureId && (() => {
+            const st = students.find(s => s.id === studentId)
+            const fs = structures.find(s => s.id === feeStructureId)
+            if (!st || !fs) return null
+            return (
+              <div className="p-3 rounded-lg bg-muted text-sm">
+                <div className="flex justify-between mb-1"><span className="text-muted-foreground">Student</span><span className="font-medium">{st.fullName}</span></div>
+                <div className="flex justify-between mb-1"><span className="text-muted-foreground">Fee</span><span>{fs.name} ({fs.className})</span></div>
+                <div className="flex justify-between mb-1"><span className="text-muted-foreground">Amount</span><span className="tabular-nums">₹{fs.amount.toLocaleString('en-IN')}</span></div>
+                <div className="flex justify-between font-semibold pt-1 border-t mt-1"><span>Due Date</span><span className="text-xs">{fs.dueDate ? new Date(fs.dueDate).toLocaleDateString('en-IN') : '30 days from now'}</span></div>
+              </div>
+            )
+          })()}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={!valid || loading} onClick={() => onSubmit({ studentId, feeStructureId })}>
+            {loading ? 'Creating…' : 'Create Invoice'}
           </Button>
         </DialogFooter>
       </DialogContent>

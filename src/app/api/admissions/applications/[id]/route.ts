@@ -28,3 +28,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const a = await db.application.update({ where: { id }, data: { status: body.status } })
   return NextResponse.json({ ...a, createdAt: a.createdAt.toISOString() })
 }
+
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const guard = await requirePerm('admissions', 'delete')
+  if (!guard.ok) return guard.res
+  await db.application.delete({ where: { id } })
+  return NextResponse.json({ ok: true, id })
+}

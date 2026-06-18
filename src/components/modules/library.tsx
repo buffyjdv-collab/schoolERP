@@ -22,11 +22,15 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@/components/ui/select'
 import {
   BookOpen, BookCheck, BookMarked, AlertTriangle, Search, Library,
-  RotateCcw, UserCheck, Hash, MapPin, IndianRupee, X,
+  RotateCcw, UserCheck, Hash, MapPin, IndianRupee, X, Plus, Pencil, Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -144,11 +148,17 @@ function IssueBookDialog({ book, open, onOpenChange }: { book: Book | null; open
 
 // ============ Catalog tab ============
 function CatalogTab() {
+  const qc = useQueryClient()
   const canIssue = useCan()('library', 'issue')
+  const canCreate = useCan()('library', 'create')
+  const canEdit = useCan()('library', 'edit')
+  const canDelete = useCan()('library', 'delete')
   const [q, setQ] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
   const [issueBook, setIssueBook] = useState<Book | null>(null)
   const [issueOpen, setIssueOpen] = useState(false)
+  const [formDialog, setFormDialog] = useState<{ mode: 'create' | 'edit'; target?: Book } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Book | null>(null)
 
   // Lightweight debounce (avoids set-state-in-effect)
   const { data: books, isLoading } = useQuery({
@@ -163,6 +173,38 @@ function CatalogTab() {
     ;(onSearch as any)._t = window.setTimeout(() => setDebouncedQ(v.trim()), 350)
   }
 
+  const createMut = useMutation({
+    mutationFn: (data: any) => api.library.createBook(data),
+    onSuccess: () => {
+      toast.success('Book added', { description: 'The new title has been added to the catalog.' })
+      qc.invalidateQueries({ queryKey: ['library', 'books'] })
+      setFormDialog(null)
+    },
+    onError: () => toast.error('Failed to add book'),
+  })
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.library.updateBook(id, data),
+    onSuccess: () => {
+      toast.success('Book updated', { description: 'The catalog entry has been saved.' })
+      qc.invalidateQueries({ queryKey: ['library', 'books'] })
+      setFormDialog(null)
+    },
+    onError: () => toast.error('Failed to update book'),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.library.deleteBook(id),
+    onSuccess: () => {
+      toast.success('Book deleted', { description: 'The title has been removed from the catalog.' })
+      qc.invalidateQueries({ queryKey: ['library', 'books'] })
+      setDeleteTarget(null)
+    },
+    onError: () => toast.error('Failed to delete book'),
+  })
+
+  const canRowActions = canEdit || canDelete
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -171,9 +213,16 @@ function CatalogTab() {
             <CardTitle className="text-base flex items-center gap-2"><BookOpen className="size-4 text-primary" /> Book Catalog</CardTitle>
             <p className="text-xs text-muted-foreground mt-1">{books?.length ?? 0} titles{q ? ` matching "${q}"` : ''}</p>
           </div>
-          <div className="relative w-full sm:w-80">
-            <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input value={q} onChange={(e) => onSearch(e.target.value)} placeholder="Search title, author, accession no, ISBN…" className="pl-9" />
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <div className="relative w-full sm:w-80">
+              <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input value={q} onChange={(e) => onSearch(e.target.value)} placeholder="Search title, author, accession no, ISBN…" className="pl-9" />
+            </div>
+            {canCreate && (
+              <Button className="gap-1.5 shrink-0" onClick={() => setFormDialog({ mode: 'create' })}>
+                <Plus className="size-4" /> <span className="hidden sm:inline">Add Book</span><span className="sm:hidden">Add</span>
+              </Button>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -196,6 +245,7 @@ function CatalogTab() {
                   <TableHead className="hidden lg:table-cell">Rack</TableHead>
                   <TableHead className="text-right hidden sm:table-cell">Price</TableHead>
                   <TableHead className="text-right">Action</TableHead>
+                  {canRowActions && <TableHead className="text-right w-24">Manage</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -233,6 +283,22 @@ function CatalogTab() {
                           <span className="text-xs text-emerald-600">Available</span>
                         )}
                       </TableCell>
+                      {canRowActions && (
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            {canEdit && (
+                              <Button size="icon" variant="ghost" className="size-7" title="Edit book" onClick={() => setFormDialog({ mode: 'edit', target: b })}>
+                                <Pencil className="size-3.5" />
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button size="icon" variant="ghost" className="size-7 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10" title="Delete book" onClick={() => setDeleteTarget(b)}>
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   )
                 })}
@@ -245,7 +311,150 @@ function CatalogTab() {
       {canIssue && (
         <IssueBookDialog book={issueBook} open={issueOpen} onOpenChange={setIssueOpen} />
       )}
+
+      {formDialog && (
+        <BookFormDialog
+          key={formDialog.mode === 'edit' ? formDialog.target?.id : 'create'}
+          mode={formDialog.mode}
+          target={formDialog.target}
+          loading={createMut.isPending || updateMut.isPending}
+          onClose={() => setFormDialog(null)}
+          onSubmit={(data) => {
+            if (formDialog.mode === 'edit' && formDialog.target) {
+              updateMut.mutate({ id: formDialog.target.id, data })
+            } else {
+              createMut.mutate(data)
+            }
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <AlertDialog open onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete book?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete <strong>{deleteTarget.title}</strong> by {deleteTarget.author} (Accession #{deleteTarget.accessionNo}). Issue history for this title may be affected. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => deleteMut.mutate(deleteTarget.id)}
+                disabled={deleteMut.isPending}
+              >
+                {deleteMut.isPending ? 'Deleting…' : 'Yes, delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </Card>
+  )
+}
+
+// ============ Book Create/Edit Dialog ============
+const BOOK_CATEGORIES = ['Fiction', 'Non-Fiction', 'Textbook', 'Reference', 'Science', 'Mathematics', 'History', 'Biography', 'Children', 'Other'] as const
+
+function BookFormDialog({
+  mode, target, loading, onClose, onSubmit,
+}: {
+  mode: 'create' | 'edit'
+  target?: Book
+  loading: boolean
+  onClose: () => void
+  onSubmit: (data: any) => void
+}) {
+  const [accessionNo, setAccessionNo] = useState(target?.accessionNo ?? '')
+  const [title, setTitle] = useState(target?.title ?? '')
+  const [author, setAuthor] = useState(target?.author ?? '')
+  const [isbn, setIsbn] = useState(target?.isbn ?? '')
+  const [category, setCategory] = useState(target?.category ?? 'Fiction')
+  const [publisher, setPublisher] = useState(target?.publisher ?? '')
+  const [price, setPrice] = useState(target ? String(target.price) : '')
+  const [totalCopies, setTotalCopies] = useState(target ? String(target.totalCopies) : '1')
+  const [rack, setRack] = useState(target?.rack ?? '')
+
+  const valid = accessionNo.trim() && title.trim() && author.trim() && Number(price) >= 0 && Number(totalCopies) >= 1
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <BookMarked className="size-4 text-primary" />
+            {mode === 'create' ? 'Add Book' : 'Edit Book'}
+          </DialogTitle>
+          <DialogDescription>
+            {mode === 'create' ? 'Add a new title to the library catalog. Fields marked with * are required.' : `Update details for ${target?.title}.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 py-1">
+          <div className="space-y-1.5">
+            <Label htmlFor="bk-acc">Accession No. *</Label>
+            <Input id="bk-acc" value={accessionNo} onChange={(e) => setAccessionNo(e.target.value)} placeholder="A-0001" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bk-isbn">ISBN</Label>
+            <Input id="bk-isbn" value={isbn} onChange={(e) => setIsbn(e.target.value)} placeholder="978-3-16-148410-0" />
+          </div>
+          <div className="space-y-1.5 col-span-2">
+            <Label htmlFor="bk-title">Title *</Label>
+            <Input id="bk-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="The Wonder of Science" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bk-author">Author *</Label>
+            <Input id="bk-author" value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="J. Verne" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bk-pub">Publisher</Label>
+            <Input id="bk-pub" value={publisher} onChange={(e) => setPublisher(e.target.value)} placeholder="Penguin" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Category</Label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {BOOK_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bk-rack">Rack</Label>
+            <Input id="bk-rack" value={rack} onChange={(e) => setRack(e.target.value)} placeholder="A-3" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bk-price">Price (₹) *</Label>
+            <Input id="bk-price" type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="350" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bk-copies">Total Copies *</Label>
+            <Input id="bk-copies" type="number" min="1" value={totalCopies} onChange={(e) => setTotalCopies(e.target.value)} placeholder="1" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={!valid || loading}
+            onClick={() => onSubmit({
+              accessionNo: accessionNo.trim(),
+              title: title.trim(),
+              author: author.trim(),
+              isbn: isbn.trim() || undefined,
+              category,
+              publisher: publisher.trim() || undefined,
+              price: Number(price),
+              totalCopies: Number(totalCopies),
+              rack: rack.trim() || undefined,
+            })}
+          >
+            {loading ? 'Saving…' : mode === 'create' ? 'Add Book' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

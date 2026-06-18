@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server'
 import ZAI from 'z-ai-web-dev-sdk'
 import { db } from '@/lib/db'
+import { getCurrentUser } from '@/lib/auth'
 
 export async function GET() {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (user.role !== 'super_admin' && user.role !== 'admin' && user.role !== 'teacher') {
+    return NextResponse.json({ error: 'Forbidden — staff only' }, { status: 403 })
+  }
   const today = new Date(); today.setHours(0,0,0,0)
   const [present, absent, late, feeCollected, feePending, defaulters, pendingLeaves, lowAttClasses] = await Promise.all([
     db.attendance.count({ where: { date: today, status: 'Present' } }),

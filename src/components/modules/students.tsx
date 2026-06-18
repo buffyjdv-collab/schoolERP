@@ -3,10 +3,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
-import type { Student, FeeInvoice, ExamMark, AttendanceRecord } from '@/lib/types'
+import type { Student, FeeInvoice, ExamMark, AttendanceRecord, ClassInfo } from '@/lib/types'
 import {
   Users, UserPlus, Search, Download, Filter, GraduationCap, Phone, Mail, MapPin,
   Calendar, Droplet, Heart, Briefcase, Bus, X, Shield, Award, TrendingUp, IdCard,
+  Pencil, Trash2,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,11 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -217,10 +223,40 @@ function AddStudentDialog({ open, onOpenChange, classes, onCreate, loading }: {
 }
 
 function StudentProfileDrawer({ studentId, onClose }: { studentId: string; onClose: () => void }) {
+  const qc = useQueryClient()
+  const canEdit = useCan()('students', 'edit')
+  const canDelete = useCan()('students', 'delete')
+  const [editOpen, setEditOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+
+  const { data: classes } = useQuery({ queryKey: ['classes'], queryFn: api.academics.classes })
   const { data: student, isLoading } = useQuery({ queryKey: ['student', studentId], queryFn: () => api.students.get(studentId) })
   const { data: fees } = useQuery({ queryKey: ['student-fees', studentId], queryFn: () => api.students.fees(studentId) })
   const { data: marks } = useQuery({ queryKey: ['student-marks', studentId], queryFn: () => api.students.marks(studentId) })
   const { data: attendance } = useQuery({ queryKey: ['student-att', studentId], queryFn: () => api.students.attendance(studentId) })
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.students.update(id, data),
+    onSuccess: () => {
+      toast.success('Student updated successfully')
+      qc.invalidateQueries({ queryKey: ['students'] })
+      qc.invalidateQueries({ queryKey: ['student', studentId] })
+      setEditOpen(false)
+    },
+    onError: (e: any) => toast.error('Failed to update: ' + e.message),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.students.remove(id),
+    onSuccess: () => {
+      toast.success('Student marked as Inactive')
+      qc.invalidateQueries({ queryKey: ['students'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      setDeleteOpen(false)
+      onClose()
+    },
+    onError: (e: any) => toast.error('Failed to delete: ' + e.message),
+  })
 
   const radarData = (marks || []).slice(0, 8).map(m => ({ subject: m.subject.slice(0, 4), marks: Math.round(((m.obtained || 0) / m.maxMarks) * 100) }))
 
@@ -351,13 +387,154 @@ function StudentProfileDrawer({ studentId, onClose }: { studentId: string; onClo
           </div>
         </ScrollArea>
 
-        <div className="p-3 border-t flex gap-2 shrink-0">
-          <Button variant="outline" size="sm" className="flex-1" onClick={() => toast.info('Generating ID card PDF…')}>ID Card</Button>
-          <Button variant="outline" size="sm" className="flex-1" onClick={() => toast.info('Generating Bonafide certificate…')}>Bonafide</Button>
-          <Button size="sm" className="flex-1" onClick={() => toast.info('Opening fee collection…')}>Collect Fee</Button>
+        <div className="p-3 border-t space-y-2 shrink-0">
+          {(canEdit || canDelete) && (
+            <div className="flex gap-2">
+              {canEdit && (
+                <Button variant="outline" size="sm" className="flex-1 gap-1.5" onClick={() => setEditOpen(true)}>
+                  <Pencil className="size-3.5" /> Edit
+                </Button>
+              )}
+              {canDelete && (
+                <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm" className="flex-1 gap-1.5">
+                      <Trash2 className="size-3.5" /> Delete
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete student?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will mark {student?.fullName ?? 'this student'} as Inactive. Continue?
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-rose-600 hover:bg-rose-700 text-white"
+                        disabled={deleteMut.isPending}
+                        onClick={() => student && deleteMut.mutate(student.id)}
+                      >
+                        {deleteMut.isPending ? 'Deleting…' : 'Yes, mark Inactive'}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => toast.info('Generating ID card PDF…')}>ID Card</Button>
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => toast.info('Generating Bonafide certificate…')}>Bonafide</Button>
+            <Button size="sm" className="flex-1" onClick={() => toast.info('Opening fee collection…')}>Collect Fee</Button>
+          </div>
         </div>
       </div>
+
+      {canEdit && (
+        <EditStudentDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          student={student}
+          classes={classes || []}
+          onSubmit={(id, data) => updateMut.mutate({ id, data })}
+          loading={updateMut.isPending}
+        />
+      )}
     </div>
+  )
+}
+
+function EditStudentDialog({ open, onOpenChange, student, classes, onSubmit, loading }: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  student: Student | null | undefined
+  classes: ClassInfo[]
+  onSubmit: (id: string, data: any) => void
+  loading: boolean
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto scroll-thin">
+        <DialogHeader>
+          <DialogTitle>Edit Student</DialogTitle>
+        </DialogHeader>
+        {student && (
+          <EditStudentForm
+            key={student.id}
+            student={student}
+            classes={classes}
+            onSubmit={onSubmit}
+            loading={loading}
+            onCancel={() => onOpenChange(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EditStudentForm({ student, classes, onSubmit, loading, onCancel }: {
+  student: Student
+  classes: ClassInfo[]
+  onSubmit: (id: string, data: any) => void
+  loading: boolean
+  onCancel: () => void
+}) {
+  const [form, setForm] = useState({
+    firstName: student.firstName || '',
+    lastName: student.lastName || '',
+    dob: student.dob ? new Date(student.dob).toISOString().slice(0, 10) : '',
+    gender: student.gender || 'Male',
+    bloodGroup: student.bloodGroup || '',
+    phone: student.phone || '',
+    email: student.email || '',
+    fatherName: student.fatherName || '',
+    motherName: student.motherName || '',
+    parentPhone: student.parentPhone || '',
+    parentEmail: student.parentEmail || '',
+    classId: student.classId || '',
+    address: student.address || '',
+    medicalInfo: student.medicalInfo || '',
+    status: student.status || 'Active',
+  })
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 py-2">
+        <div><Label>First Name *</Label><Input value={form.firstName} onChange={e => set('firstName', e.target.value)} /></div>
+        <div><Label>Last Name *</Label><Input value={form.lastName} onChange={e => set('lastName', e.target.value)} /></div>
+        <div><Label>Date of Birth</Label><Input type="date" value={form.dob} onChange={e => set('dob', e.target.value)} /></div>
+        <div><Label>Gender</Label>
+          <Select value={form.gender} onValueChange={v => set('gender', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Male">Male</SelectItem><SelectItem value="Female">Female</SelectItem></SelectContent></Select>
+        </div>
+        <div><Label>Blood Group</Label>
+          <Select value={form.bloodGroup} onValueChange={v => set('bloodGroup', v)}><SelectTrigger><SelectValue placeholder="—" /></SelectTrigger><SelectContent>{['A+','B+','O+','AB+','A-','B-','O-','AB-'].map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent></Select>
+        </div>
+        <div><Label>Phone</Label><Input value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="Student phone" /></div>
+        <div><Label>Email</Label><Input value={form.email} onChange={e => set('email', e.target.value)} placeholder="Student email" /></div>
+        <div><Label>Class</Label>
+          <Select value={form.classId} onValueChange={v => set('classId', v)}><SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger><SelectContent>{classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
+        </div>
+        <div><Label>Father&rsquo;s Name</Label><Input value={form.fatherName} onChange={e => set('fatherName', e.target.value)} /></div>
+        <div><Label>Mother&rsquo;s Name</Label><Input value={form.motherName} onChange={e => set('motherName', e.target.value)} /></div>
+        <div><Label>Parent Phone</Label><Input value={form.parentPhone} onChange={e => set('parentPhone', e.target.value)} placeholder="+91…" /></div>
+        <div><Label>Parent Email</Label><Input value={form.parentEmail} onChange={e => set('parentEmail', e.target.value)} /></div>
+        <div><Label>Status</Label>
+          <Select value={form.status} onValueChange={v => set('status', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Active">Active</SelectItem><SelectItem value="Inactive">Inactive</SelectItem><SelectItem value="Alumni">Alumni</SelectItem></SelectContent></Select>
+        </div>
+        <div className="col-span-2"><Label>Address</Label><Input value={form.address} onChange={e => set('address', e.target.value)} /></div>
+        <div className="col-span-2"><Label>Medical Info</Label><Input value={form.medicalInfo} onChange={e => set('medicalInfo', e.target.value)} placeholder="Allergies, conditions, etc." /></div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button disabled={!form.firstName || !form.lastName || loading} onClick={() => onSubmit(student.id, form)}>
+          {loading ? 'Saving…' : 'Save Changes'}
+        </Button>
+      </DialogFooter>
+    </>
   )
 }
 

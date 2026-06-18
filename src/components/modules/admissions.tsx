@@ -30,9 +30,14 @@ import {
 import {
   UserPlus, ClipboardList, FileCheck2, Percent, Search, MoreHorizontal,
   ChevronRight, Mail, MessageSquare, CheckCircle2,
-  ClipboardCheck, CalendarClock, Ban, FileText, GraduationCap,
+  ClipboardCheck, CalendarClock, Ban, FileText, GraduationCap, Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useCan } from '@/lib/store'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 const CLASSES = Array.from({ length: 10 }, (_, i) => `Class ${i + 1}`)
 const SOURCES = ['Website', 'Walk-in', 'Referral'] as const
@@ -269,7 +274,9 @@ function PipelineOverview({
 // ============ Enquiries table ============
 function EnquiriesTable({ enquiries }: { enquiries: AdmissionEnquiry[] }) {
   const qc = useQueryClient()
+  const canDelete = useCan()('admissions', 'delete')
   const [q, setQ] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<AdmissionEnquiry | null>(null)
 
   const updateMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => api.admissions.updateEnquiry(id, { status }),
@@ -280,6 +287,23 @@ function EnquiriesTable({ enquiries }: { enquiries: AdmissionEnquiry[] }) {
     onError: () => toast.error('Failed to update status'),
   })
 
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/admissions/enquiries/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '')
+        throw new Error(`API ${res.status}: ${txt || res.statusText}`)
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      toast.success('Enquiry deleted')
+      qc.invalidateQueries({ queryKey: ['admissions', 'enquiries'] })
+      setDeleteTarget(null)
+    },
+    onError: (e: any) => toast.error('Failed to delete: ' + e.message),
+  })
+
   const filtered = enquiries.filter((e) => {
     if (!q) return true
     const s = q.toLowerCase()
@@ -287,6 +311,7 @@ function EnquiriesTable({ enquiries }: { enquiries: AdmissionEnquiry[] }) {
   })
 
   return (
+    <>
     <Card>
       <CardHeader className="pb-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -370,6 +395,14 @@ function EnquiriesTable({ enquiries }: { enquiries: AdmissionEnquiry[] }) {
                                 </div>
                               </>
                             )}
+                            {canDelete && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem variant="destructive" onClick={() => setDeleteTarget(e)} className="gap-2">
+                                  <Trash2 className="size-4" /> Delete Enquiry
+                                </DropdownMenuItem>
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -382,13 +415,37 @@ function EnquiriesTable({ enquiries }: { enquiries: AdmissionEnquiry[] }) {
         )}
       </CardContent>
     </Card>
+
+    <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete enquiry?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently delete {deleteTarget?.studentName ?? 'this enquiry'}&rsquo;s admission enquiry. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-rose-600 hover:bg-rose-700 text-white"
+            disabled={deleteMut.isPending}
+            onClick={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+          >
+            {deleteMut.isPending ? 'Deleting…' : 'Yes, delete'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }
 
 // ============ Applications table ============
 function ApplicationsTable({ applications }: { applications: Application[] }) {
   const qc = useQueryClient()
+  const canDelete = useCan()('admissions', 'delete')
   const [q, setQ] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<Application | null>(null)
 
   const updateMut = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => api.admissions.updateApplication(id, { status }),
@@ -403,6 +460,23 @@ function ApplicationsTable({ applications }: { applications: Application[] }) {
     onError: () => toast.error('Failed to update application'),
   })
 
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/admissions/applications/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '')
+        throw new Error(`API ${res.status}: ${txt || res.statusText}`)
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      toast.success('Application deleted')
+      qc.invalidateQueries({ queryKey: ['admissions', 'applications'] })
+      setDeleteTarget(null)
+    },
+    onError: (e: any) => toast.error('Failed to delete: ' + e.message),
+  })
+
   const filtered = applications.filter((a) => {
     if (!q) return true
     const s = q.toLowerCase()
@@ -410,6 +484,7 @@ function ApplicationsTable({ applications }: { applications: Application[] }) {
   })
 
   return (
+    <>
     <Card>
       <CardHeader className="pb-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -494,6 +569,14 @@ function ApplicationsTable({ applications }: { applications: Application[] }) {
                               </div>
                             </>
                           )}
+                          {canDelete && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem variant="destructive" onClick={() => setDeleteTarget(a)} className="gap-2">
+                                <Trash2 className="size-4" /> Delete Application
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -505,6 +588,28 @@ function ApplicationsTable({ applications }: { applications: Application[] }) {
         )}
       </CardContent>
     </Card>
+
+    <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete application?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently delete {deleteTarget?.studentName ?? 'this application'}&rsquo;s admission application. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-rose-600 hover:bg-rose-700 text-white"
+            disabled={deleteMut.isPending}
+            onClick={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+          >
+            {deleteMut.isPending ? 'Deleting…' : 'Yes, delete'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }
 

@@ -23,8 +23,12 @@ import {
 } from '@/components/ui/select'
 import {
   MessageSquare, Mail, Smartphone, Bell, Send, Sparkles, AlertTriangle,
-  Inbox, Megaphone, Search, RefreshCw,
+  Inbox, Megaphone, Search, RefreshCw, Trash2,
 } from 'lucide-react'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { toast } from 'sonner'
 
 const CHANNELS = [
@@ -214,8 +218,21 @@ function ComposeCard() {
 
 // ============ History Card ============
 function HistoryCard({ notifications }: { notifications: Notification[] }) {
+  const qc = useQueryClient()
+  const canDelete = useCan()('communication', 'delete')
   const [channelFilter, setChannelFilter] = useState('all')
   const [q, setQ] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<Notification | null>(null)
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.communication.remove(id),
+    onSuccess: () => {
+      toast.success('Notification deleted', { description: 'The message has been removed from history.' })
+      qc.invalidateQueries({ queryKey: ['communication', 'list'] })
+      setDeleteTarget(null)
+    },
+    onError: () => toast.error('Failed to delete notification'),
+  })
 
   const filtered = notifications.filter((n) => {
     if (channelFilter !== 'all' && n.channel !== channelFilter) return false
@@ -260,6 +277,7 @@ function HistoryCard({ notifications }: { notifications: Notification[] }) {
                   <TableHead className="hidden md:table-cell">Category</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right hidden sm:table-cell">Time</TableHead>
+                  {canDelete && <TableHead className="text-right w-16">Delete</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -285,6 +303,19 @@ function HistoryCard({ notifications }: { notifications: Notification[] }) {
                       <TableCell className="hidden md:table-cell"><Badge variant="outline" className="text-[10px]">{n.category}</Badge></TableCell>
                       <TableCell><StatusBadge status={n.status} /></TableCell>
                       <TableCell className="text-right hidden sm:table-cell text-xs text-muted-foreground">{fmtDateTime(n.createdAt)}</TableCell>
+                      {canDelete && (
+                        <TableCell className="text-right">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-7 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10"
+                            title="Delete notification"
+                            onClick={() => setDeleteTarget(n)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </TableCell>
+                      )}
                     </TableRow>
                   )
                 })}
@@ -293,6 +324,30 @@ function HistoryCard({ notifications }: { notifications: Notification[] }) {
           </div>
         )}
       </CardContent>
+
+      {deleteTarget && (
+        <AlertDialog open onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete notification?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete the <strong>{deleteTarget.channel}</strong> message sent to <strong>{deleteTarget.recipient}</strong>
+                {deleteTarget.subject ? ` — “${deleteTarget.subject}”` : ''}. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => deleteMut.mutate(deleteTarget.id)}
+                disabled={deleteMut.isPending}
+              >
+                {deleteMut.isPending ? 'Deleting…' : 'Yes, delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </Card>
   )
 }

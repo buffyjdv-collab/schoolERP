@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { Exam, ExamMark, Student } from '@/lib/types'
 import { useCan, useStore } from '@/lib/store'
@@ -10,6 +10,8 @@ import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -20,10 +22,17 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@/components/ui/select'
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   ClipboardList, CheckCircle2, FileBarChart2, FileText, GraduationCap,
   ChevronRight, CalendarDays, Award, TrendingUp, PieChart as PieChartIcon,
   Download, Sparkles, BookOpen, Trophy, Palette, HeartHandshake, Compass,
-  Activity, Percent, Hash, RefreshCw, School,
+  Activity, Percent, Hash, RefreshCw, School, Plus, Pencil, Trash2,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -34,6 +43,8 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 const PIE_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#f43f5e', '#8b5cf6', '#0ea5e9', '#64748b']
+
+const EXAM_TYPES = ['Unit Test', 'Mid Term', 'Final', 'Online'] as const
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -62,17 +73,21 @@ function pctColorClass(pct: number): string {
 // Exam list item (left pane)
 // ============================================================
 function ExamListItem({
-  exam, active, onClick,
+  exam, active, onClick, canEdit, canDelete, onEdit, onDelete,
 }: {
   exam: Exam
   active: boolean
   onClick: () => void
+  canEdit?: boolean
+  canDelete?: boolean
+  onEdit?: () => void
+  onDelete?: () => void
 }) {
   return (
-    <button
+    <div
       onClick={onClick}
       className={cn(
-        'w-full text-left rounded-xl border p-4 transition-all group',
+        'w-full text-left rounded-xl border p-4 transition-all group cursor-pointer',
         active
           ? 'border-primary bg-primary/5 shadow-sm'
           : 'border-border hover:border-primary/40 hover:bg-accent/40',
@@ -102,7 +117,73 @@ function ExamListItem({
           <Hash className="size-3" /> {exam.marksCount ?? 0}
         </Badge>
       </div>
-    </button>
+      {(canEdit || canDelete) && (
+        <div className="flex items-center justify-end gap-1 mt-2 pt-2 border-t" onClick={(e) => e.stopPropagation()}>
+          {canEdit && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={onEdit}
+              title="Edit exam"
+            >
+              <Pencil className="size-3.5" /> Edit
+            </Button>
+          )}
+          {canDelete && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs text-rose-600 hover:bg-rose-500/10"
+              onClick={onDelete}
+              title="Delete exam"
+            >
+              <Trash2 className="size-3.5" /> Delete
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================
+// Inline editable mark cell
+// ============================================================
+function EditableMarkCell({
+  value, maxMarks, loading, onSave,
+}: {
+  value: number | null | undefined
+  maxMarks: number
+  loading?: boolean
+  onSave: (obtained: number) => void
+}) {
+  const [v, setV] = useState(value == null ? '' : String(value))
+  return (
+    <input
+      type="number"
+      value={v}
+      min={0}
+      max={maxMarks}
+      disabled={loading}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={() => {
+        const raw = v.trim()
+        if (raw === '') {
+          // empty → treat as 0 only if it changed from a non-null value
+          if (value != null) onSave(0)
+          return
+        }
+        const n = Number(raw)
+        if (Number.isNaN(n)) return
+        if (n === value) return
+        onSave(n)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+      }}
+      className="w-14 text-center text-[11px] tabular-nums rounded border border-input bg-card px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
+    />
   )
 }
 
@@ -121,14 +202,16 @@ interface PivotRow {
 }
 
 function MarksSheetTab({
-  exam, classId,
+  exam, classId, canEnter,
 }: {
   exam: Exam
   classId: string
+  canEnter: boolean
 }) {
   const user = useStore((s) => s.user)
   const isParent = user?.role === 'parent'
   const childIds = isParent ? (user?.childrenStudentIds ?? []) : []
+  const qc = useQueryClient()
 
   const marksQ = useQuery({
     queryKey: ['exams', 'marks', exam.id, classId],
@@ -156,11 +239,6 @@ function MarksSheetTab({
   const marks = isParent && effectiveChildId
     ? allMarks.filter((m) => m.studentId === effectiveChildId)
     : allMarks
-
-  // NOTE: any future marks-entry input / cell-editing UI MUST be wrapped in
-  // `useCan()('exams','enter')` so only teachers/admins can edit. The sheet
-  // below is read-only display — students/parents see only their own /
-  // children's marks (the backend enforces scoping).
 
   const { subjects, rows, subjectAverages } = useMemo(() => {
     const subjectSet = new Map<string, { name: string; max: number }>()
@@ -203,6 +281,20 @@ function MarksSheetTab({
     return { subjects, rows, subjectAverages }
   }, [marks])
 
+  // Edit mode for marks entry (teachers/admins only)
+  const [editMode, setEditMode] = useState(false)
+
+  const enterMarksMut = useMutation({
+    mutationFn: (data: { examId: string; studentId: string; subject: string; maxMarks: number; obtained: number }) =>
+      api.exams.enterMarks(data),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['exams', 'marks', exam.id, classId] })
+      qc.invalidateQueries({ queryKey: ['exams', 'list'] })
+      toast.success(`Marks saved · ${vars.subject}: ${vars.obtained}/${vars.maxMarks}`)
+    },
+    onError: (e: any) => toast.error('Failed to save marks: ' + e.message),
+  })
+
   if (marksQ.isLoading) {
     return (
       <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
@@ -229,9 +321,22 @@ function MarksSheetTab({
               {exam.name} · {rows.length} students · {subjects.length} subjects
             </CardDescription>
           </div>
-          <Badge variant="secondary" className="text-[11px] gap-1">
-            <Award className="size-3" /> Avg {subjectAverages.length ? Math.round(subjectAverages.reduce((a, s) => a + s.pct, 0) / subjectAverages.length) : 0}%
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-[11px] gap-1">
+              <Award className="size-3" /> Avg {subjectAverages.length ? Math.round(subjectAverages.reduce((a, s) => a + s.pct, 0) / subjectAverages.length) : 0}%
+            </Badge>
+            {canEnter && (
+              <Button
+                size="sm"
+                variant={editMode ? 'default' : 'outline'}
+                onClick={() => setEditMode((m) => !m)}
+                className="h-8 text-xs"
+              >
+                <Pencil className="size-3.5" />
+                {editMode ? 'Done Editing' : 'Edit Mode'}
+              </Button>
+            )}
+          </div>
         </div>
         {isParent && childrenWithMarks.length > 1 && (
           <div className="flex items-center gap-2 mt-3 pt-3 border-t">
@@ -248,6 +353,12 @@ function MarksSheetTab({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+        )}
+        {canEnter && editMode && (
+          <div className="mt-3 pt-3 border-t text-xs text-muted-foreground flex items-center gap-2">
+            <Sparkles className="size-3.5 text-primary" />
+            Click any marks cell to edit. Press <kbd className="px-1.5 py-0.5 rounded border bg-muted text-[10px]">Enter</kbd> or click away to save.
           </div>
         )}
       </CardHeader>
@@ -287,6 +398,29 @@ function MarksSheetTab({
                     const cell = r.cells[s.name]
                     const obtained = cell?.obtained
                     const pct = cell && cell.maxMarks ? Math.round(((obtained ?? 0) / cell.maxMarks) * 100) : 0
+                    if (canEnter && editMode) {
+                      return (
+                        <TableCell key={s.name} className="text-center">
+                          <div className="inline-flex">
+                            <EditableMarkCell
+                              key={`${r.studentId}-${s.name}-${obtained ?? 'null'}`}
+                              value={obtained}
+                              maxMarks={s.max}
+                              loading={enterMarksMut.isPending}
+                              onSave={(newObtained) =>
+                                enterMarksMut.mutate({
+                                  examId: exam.id,
+                                  studentId: r.studentId,
+                                  subject: s.name,
+                                  maxMarks: s.max,
+                                  obtained: newObtained,
+                                })
+                              }
+                            />
+                          </div>
+                        </TableCell>
+                      )
+                    }
                     return (
                       <TableCell key={s.name} className="text-center">
                         {cell ? (
@@ -781,12 +915,83 @@ function AnalysisTab({
 }
 
 // ============================================================
+// Create / Edit Exam dialog
+// ============================================================
+function ExamDialog({
+  mode, target, loading, onClose, onSubmit,
+}: {
+  mode: 'create' | 'edit'
+  target?: Exam
+  loading: boolean
+  onClose: () => void
+  onSubmit: (data: { name: string; examType: string; startDate: string; endDate: string }) => void
+}) {
+  const [name, setName] = useState(target?.name ?? '')
+  const [examType, setExamType] = useState(target?.examType ?? 'Unit Test')
+  const [startDate, setStartDate] = useState(target ? target.startDate.slice(0, 10) : '')
+  const [endDate, setEndDate] = useState(target ? target.endDate.slice(0, 10) : '')
+
+  const valid = name.trim() && startDate && endDate && new Date(endDate) >= new Date(startDate)
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ClipboardList className="size-5 text-primary" />
+            {mode === 'create' ? 'New Exam' : 'Edit Exam'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="exam-name">Exam Name</Label>
+            <Input id="exam-name" placeholder="e.g. First Unit Test 2026-27" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Exam Type</Label>
+            <Select value={examType} onValueChange={setExamType}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {EXAM_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="exam-start">Start Date</Label>
+              <Input id="exam-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="exam-end">End Date</Label>
+              <Input id="exam-end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={!valid || loading}
+            onClick={() => onSubmit({ name: name.trim(), examType, startDate, endDate })}
+          >
+            {loading ? 'Saving…' : mode === 'create' ? 'Create Exam' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============================================================
 // Main module
 // ============================================================
 export function ExamsModule() {
   const can = useCan()
   const user = useStore((s) => s.user)
   const canEnter = can('exams', 'enter')
+  const canCreate = can('exams', 'create')
+  const canEdit = can('exams', 'edit')
+  const canDelete = can('exams', 'delete')
+  const qc = useQueryClient()
   // Students/parents: backend already scopes marks to their own/children's,
   // so the class selector is meaningless for them — hide it.
   const isStudentOrParent = user?.role === 'student' || user?.role === 'parent'
@@ -805,6 +1010,31 @@ export function ExamsModule() {
   // For staff: default to first class so the marks sheet is populated.
   // For students/parents: leave empty — the backend scopes by role anyway.
   const effectiveClassId = isStudentOrParent ? '' : (classId || (classes[0]?.id ?? ''))
+
+  // CRUD state
+  const [examDialog, setExamDialog] = useState<{ mode: 'create' | 'edit'; target?: Exam } | null>(null)
+  const [examDelete, setExamDelete] = useState<Exam | null>(null)
+
+  const createExamMut = useMutation({
+    mutationFn: (data: { name: string; examType: string; startDate: string; endDate: string }) => api.exams.create(data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['exams', 'list'] }); toast.success('Exam created'); setExamDialog(null) },
+    onError: (e: any) => toast.error('Failed to create exam: ' + e.message),
+  })
+  const updateExamMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { name: string; examType: string; startDate: string; endDate: string } }) => api.exams.update(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['exams', 'list'] }); toast.success('Exam updated'); setExamDialog(null) },
+    onError: (e: any) => toast.error('Failed to update exam: ' + e.message),
+  })
+  const deleteExamMut = useMutation({
+    mutationFn: (id: string) => api.exams.remove(id),
+    onSuccess: (_d, deletedId) => {
+      qc.invalidateQueries({ queryKey: ['exams', 'list'] })
+      toast.success('Exam deleted')
+      setExamDelete(null)
+      if (effectiveSelectedId === deletedId) setSelectedId('')
+    },
+    onError: (e: any) => toast.error('Failed to delete exam: ' + e.message),
+  })
 
   // Total stats
   const totalExams = exams.length
@@ -851,7 +1081,14 @@ export function ExamsModule() {
         <div className="lg:col-span-1 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold flex items-center gap-2"><ClipboardList className="size-4 text-primary" /> Examinations</h3>
-            <Badge variant="secondary" className="text-[11px]">{exams.length}</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-[11px]">{exams.length}</Badge>
+              {canCreate && (
+                <Button size="sm" className="h-8 text-xs" onClick={() => setExamDialog({ mode: 'create' })}>
+                  <Plus className="size-3.5" /> New Exam
+                </Button>
+              )}
+            </div>
           </div>
 
           {examsQ.isLoading ? (
@@ -870,6 +1107,10 @@ export function ExamsModule() {
                   exam={e}
                   active={effectiveSelectedId === e.id}
                   onClick={() => setSelectedId(e.id)}
+                  canEdit={canEdit}
+                  canDelete={canDelete}
+                  onEdit={() => setExamDialog({ mode: 'edit', target: e })}
+                  onDelete={() => setExamDelete(e)}
                 />
               ))}
             </div>
@@ -942,7 +1183,7 @@ export function ExamsModule() {
                 </TabsList>
 
                 <TabsContent value="marks" className="mt-4">
-                  <MarksSheetTab exam={selectedExam} classId={effectiveClassId} />
+                  <MarksSheetTab exam={selectedExam} classId={effectiveClassId} canEnter={canEnter} />
                 </TabsContent>
 
                 <TabsContent value="progress" className="mt-4">
@@ -957,6 +1198,45 @@ export function ExamsModule() {
           )}
         </div>
       </div>
+
+      {examDialog && (
+        <ExamDialog
+          mode={examDialog.mode}
+          target={examDialog.target}
+          loading={createExamMut.isPending || updateExamMut.isPending}
+          onClose={() => setExamDialog(null)}
+          onSubmit={(data) => {
+            if (examDialog.mode === 'edit' && examDialog.target) {
+              updateExamMut.mutate({ id: examDialog.target.id, data })
+            } else {
+              createExamMut.mutate(data)
+            }
+          }}
+        />
+      )}
+
+      {examDelete && (
+        <AlertDialog open onOpenChange={(o) => { if (!o) setExamDelete(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete exam?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete <strong>{examDelete.name}</strong> ({examDelete.examType}, {fmtRange(examDelete.startDate, examDelete.endDate)}) along with all marks entered for it. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => deleteExamMut.mutate(examDelete.id)}
+                disabled={deleteExamMut.isPending}
+              >
+                {deleteExamMut.isPending ? 'Deleting…' : 'Yes, delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   )
 }

@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getCurrentUser } from '@/lib/auth'
 
 export async function GET() {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (user.role !== 'super_admin' && user.role !== 'admin' && user.role !== 'teacher') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
   const invoices = await db.feeInvoice.findMany({ select: { paidAmount: true, amount: true, status: true, createdAt: true } })
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const now = new Date()

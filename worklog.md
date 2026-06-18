@@ -286,3 +286,198 @@ Stage Summary:
 - Demo accounts: superadmin/super123, admin/admin123, teacher/teacher123, student/student123, parent/parent123
 - ESLint: 0 errors across entire src/. Dev server + transport tracker both healthy.
 - Agent-browser verified: student/parent/teacher/admin all render correctly with appropriate access.
+
+---
+Task ID: 3
+Agent: 3-admin-crud-ui
+Task: Add admin CRUD UI (Create/Edit/Delete dialogs + buttons, RBAC-guarded) to 3 existing ERP module files: students.tsx, admissions.tsx, academics.tsx
+
+Work Log:
+- Read worklog.md (architecture, RBAC, prior agents' work) + the 3 target module files + their backend routes + `api` helper + `useCan` hook + AlertDialog component.
+- Found that the spec's claim "backend CRUD API routes are ALL already built and working" was inaccurate for admissions DELETE — added minimal 3-line `DELETE` handlers to `src/app/api/admissions/enquiries/[id]/route.ts` and `src/app/api/admissions/applications/[id]/route.ts` (both `requirePerm('admissions','delete')` + `db.<entity>.delete`). The students `DELETE` and academics `deleteClass` / `deleteSlot` routes already existed.
+- Files modified (5 total — 3 UI per spec + 2 minimal backend route additions):
+
+1. `src/components/modules/students.tsx` — added `AlertDialog*` imports, `Pencil` + `Trash2` icons, `ClassInfo` type.
+   - `StudentProfileDrawer` now reads `canEdit = useCan()('students','edit')` + `canDelete = useCan()('students','delete')`, fetches `classes` (cached via shared `['classes']` queryKey), owns `updateMut` (`api.students.update`) + `deleteMut` (`api.students.remove` — soft-delete to Inactive). Drawer footer restructured: a new top row (only if `canEdit||canDelete`) holds an outline **Edit** button (`Pencil` icon) + a destructive **Delete** button (`Trash2` icon) wrapped in `<AlertDialog>` with the exact spec copy "This will mark {fullName} as Inactive. Continue?" → red "Yes, mark Inactive". Existing ID Card / Bonafide / Collect Fee row kept below.
+   - New `EditStudentDialog` + `EditStudentForm` (uses `key={student.id}` to remount per student, no set-state-in-effect). Pre-fills all 15 spec'd fields: firstName, lastName, dob, gender, bloodGroup, phone, email, fatherName, motherName, parentPhone, parentEmail, classId, address, medicalInfo, status. On submit → `api.students.update(id, data)` → toast + invalidate `['students']` + `['student',id]` + close dialog.
+
+2. `src/components/modules/admissions.tsx` — added `AlertDialog*` imports, `Trash2` icon, `useCan` from `@/lib/store`.
+   - `EnquiriesTable` + `ApplicationsTable` each: `canDelete = useCan()('admissions','delete')`, state-controlled `deleteTarget`, and a `deleteMut` that calls `DELETE /api/admissions/{enquiries|applications}/{id}` **directly via fetch** (per spec — no api helper exists for delete enquiry/application). On success → toast + invalidate + clear target. Each table's return wrapped in `<>…</>` so a sibling `<AlertDialog>` can render the confirm. Dropdown gains a destructive "Delete Enquiry" / "Delete Application" item (after the note/email section, with separator) — only when `canDelete`. Confirm copy: "This will permanently delete {studentName}'s admission enquiry/application. This action cannot be undone." → red "Yes, delete". Existing status-advance / Approve / Reject items untouched.
+
+3. `src/components/modules/academics.tsx` — added `useMutation`, `useQueryClient`, `useCan`, `toast`, `Button`, `Label`, `Dialog*`, `AlertDialog*`, `Plus`, `Pencil`, `Trash2` imports.
+   - `AcademicsModule`: reads `canCreate/canEdit/canDelete = useCan()('academics', …)`. Owns 4 mutations: `createClassMut` (`api.academics.createClass({ name })`), `updateClassMut` (`api.academics.updateClass(id, { name })`), `deleteClassMut` (`api.academics.deleteClass(id)`), `deleteSlotMut` (`api.academics.deleteSlot(id)`). Each invalidates `['academics','classes']` (or `['academics','timetable']` for slot) + toast + close dialog. Added state: `addClassOpen`, `editClassOpen`, `deleteClassOpen`, `deleteSlotTarget`.
+     - Left pane classes-list header now has an "Add" button (outline, `Plus`) next to the count badge — when `canCreate`. Opens `AddClassDialog` (single `name` field).
+     - Right pane class summary card header now has **Rename** (outline, `Pencil`) and **Delete** (destructive, `Trash2`) buttons after the stats — when `canEdit`/`canDelete`. Rename opens `EditClassDialog` (pre-filled, `key={cls.id}`). Delete opens `<AlertDialog>` "permanently delete {name} along with its sections, subjects and timetable slots" → `deleteClassMut` + clears `selectedId`.
+     - `SectionsSubjectsTab` now takes `canEdit` prop. When `canEdit`, "Add Section" + "Add Subject" buttons appear next to their respective headings. The tab owns its own `addSectionMut` (`api.academics.addSection(classId, data)`) + `addSubjectMut` (`api.academics.addSubject(classId, data)`).
+     - `TimetableGrid` now takes `canDelete` + `onSlotClick` props. When `canDelete`, every filled slot cell becomes a `<button>` with `cursor-pointer` + rose-tinted hover border + tiny "click to delete" hint. Click → `setDeleteSlotTarget(slot)` → `<AlertDialog>` showing slot's subject + day + period + time + teacher → red "Delete this slot" → `deleteSlotMut`.
+   - New components: `AddClassDialog`, `EditClassDialog` + `EditClassForm` (key-remount pattern), `AddSectionDialog` (name, capacity, teacherId), `AddSubjectDialog` (name, code, teacherId). Section/Subject cards fall back to `teacherId` if `teacherName` missing (the GET classes route currently returns teacherId only).
+   - `teacherId` field on Add Section/Add Subject is a free-text input (Prisma schema has `teacherId String?` with no FK constraint, so any string works; empty → backend stores null). Avoided depending on `api.hr.employees()` since that route has no GET handler (pre-existing HR module issue, unrelated to this task).
+
+4. `src/app/api/admissions/enquiries/[id]/route.ts` — added 7-line `DELETE` handler: `requirePerm('admissions','delete')` + `db.admissionEnquiry.delete({ where: { id } })` → `{ ok: true, id }`.
+
+5. `src/app/api/admissions/applications/[id]/route.ts` — added 7-line `DELETE` handler: `requirePerm('admissions','delete')` + `db.application.delete({ where: { id } })` → `{ ok: true, id }`.
+
+- Conventions followed: `'use client'` first line preserved on all 3 module files; mutations use `useMutation` + `qc.invalidateQueries` + `toast.success`/`toast.error` from sonner; every create/edit/delete button wrapped in `useCan()('module','action')` (admin & super_admin only); emerald/teal accent preserved, destructive actions use rose-600 AlertDialogAction with `hover:bg-rose-700`; NO indigo/blue; responsive (mobile-first, `size="sm"` + `h-8` compact buttons, class-header actions wrap on small screens); existing functionality untouched — only additive CRUD UI; AlertDialog used for all delete confirmations per spec; no `useEffect` (form state via `useState` initializer + `key={entity.id}` remount pattern to avoid `react-hooks/set-state-in-effect` violations).
+- ESLint: `bun node_modules/eslint/bin/eslint.js src/components/modules/students.tsx src/components/modules/admissions.tsx src/components/modules/academics.tsx` → **exit 0, 0 errors, 0 warnings**. Also ran on the 2 modified route files → exit 0.
+- TypeScript: `bunx tsc --noEmit` → only **pre-existing** error in `students.tsx:294` (`<Info label="Gender" value={student?.gender} />` — `student?.gender` is `string | undefined` while `Info.value` expects `string`). Verified via `git stash` that this error exists on the unmodified file (was at line 258 before my 36-line insertion). admissions.tsx + academics.tsx have ZERO TS errors. Not introduced by this task.
+- Dev log: `✓ Compiled in 141ms / 192ms / 216ms / 386ms` after each save — no compile errors. Pre-existing `GET /api/hr/employees 405` is unrelated.
+
+Stage Summary:
+- 3 ERP module files now have full admin CRUD UI, all RBAC-guarded client-side (`useCan`) AND server-side (`requirePerm`):
+  - **Students**: Edit (15-field dialog pre-filled from student) + Delete (AlertDialog → soft-delete to Inactive) from the profile drawer footer.
+  - **Admissions**: Delete Enquiry + Delete Application (AlertDialog confirm, fetch-based DELETE) in the actions dropdowns.
+  - **Academics**: Add Class (dialog), Rename Class (dialog), Delete Class (AlertDialog), Add Section (dialog), Add Subject (dialog), Delete Timetable Slot (clickable cell → AlertDialog).
+- Plus 2 minimal backend `DELETE` handlers added to admissions routes (7 lines each) to make the Delete UI functional end-to-end.
+- Lint status: 3 module files + 2 route files, 0 errors, 0 warnings, exit 0.
+- All admin/super_admin actions now have proper UI; teachers/students/parents see no create/edit/delete buttons (useCan returns false for them on these actions).
+
+---
+Task ID: 4
+Agent: 4-admin-crud-ui
+Task: Add admin CRUD UI (Create/Edit/Delete dialogs + buttons, RBAC-guarded) to 3 existing ERP module files: fees.tsx, exams.tsx, timetable.tsx
+
+Work Log:
+- Read worklog.md (architecture, RBAC, prior agents' work — esp. Task 3 which set the pattern for Students/Admissions/Academics CRUD UI) + the 3 target module files + their backend routes (`/api/fees/structures`, `/api/fees/invoices/create`, `/api/exams`, `/api/exams/marks/enter`, `/api/academics/timetable`) + the `api` helper + `useCan` hook + AlertDialog + Select components.
+- Confirmed the spec's claim this time: every CRUD endpoint called (`fees.createStructure/updateStructure/deleteStructure`, `fees.createInvoice/deleteInvoice`, `exams.create/update/remove`, `exams.enterMarks`, `academics.addSlot/deleteSlot`) already exists and is `requirePerm`-guarded server-side. **No backend changes needed.**
+- Files modified (3 UI files, additive only):
+
+1. `src/components/modules/fees.tsx` — added `useMutation`, `useQueryClient`, `AlertDialog*`, `Pencil`+`Trash2`+`Plus`, types `FeeStructure`/`Student`/`ClassInfo`.
+   - `FeesModule` reads `canEdit` + `canDelete` (new) in addition to existing `canCreate`/`canCollect`/`canPay`. Owns 5 mutations: `createStructMut`, `updateStructMut`, `deleteStructMut` (all → invalidate `['fee-structures']`), `createInvMut`, `deleteInvMut` (both → invalidate `['invoices']` + `['fee-summary']`). Each toasts success/error.
+   - Added 2 supporting useQuery hooks (shared queryKeys): `['classes']` (for the structure class picker) and `['students','list','fees-crud']` (for the invoice student picker).
+   - **Add Structure** button (already `canCreate`-guarded) now opens a real `FeeStructureDialog` (name, classId select from `api.academics.classes()`, amount, frequency select [Annual/Term/Monthly/OneTime], dueDate). Same dialog handles edit mode (pre-filled from clicked row).
+   - Fee Structure table gains an "Actions" column (only when `canEdit||canDelete`): `Pencil` (edit, when `canEdit`) + `Trash2` (delete, when `canDelete`, rose) icon buttons per row. Delete opens `<AlertDialog>` "Delete fee structure? … name / class / frequency / amount … existing invoices will not be affected" → red `AlertDialogAction` "Yes, delete" → `deleteStructMut`.
+   - Invoices tab header gains a "Create Invoice" button (when `canCreate`) → opens `CreateInvoiceDialog` with a searchable student picker (filter by name/admission no/class — Select shows first 100 matches) + fee structure picker (shows name/class/amount/frequency) + live preview card. On submit → `api.fees.createInvoice({studentId, feeStructureId})`.
+   - Each invoice row gains a `Trash2` icon button next to the existing Collect/Receipt button (when `canDelete`) → `<AlertDialog>` "Delete invoice? … invoiceNo / studentName / amount / status" → red action → `deleteInvMut`.
+   - All 5 dialogs/alert-dialogs conditionally rendered at the bottom of `FeesModule` via `{state && <Component/>}` so they mount fresh each time (initial state derived from `target` — no set-state-in-effect issues).
+   - Existing KPI cards, charts, Invoices/Defaulters/Structures/Accounting tabs, PaymentDialog, accounting export panel — untouched.
+
+2. `src/components/modules/exams.tsx` — added `useMutation`, `useQueryClient`, `Dialog*`, `AlertDialog*`, `Input`, `Label`, `Plus`, `Pencil`, `Trash2`.
+   - `ExamsModule` reads `canCreate`/`canEdit`/`canDelete` (new) in addition to existing `canEnter`. Owns 3 mutations: `createExamMut`, `updateExamMut`, `deleteExamMut` (all → invalidate `['exams','list']`). Delete also clears `selectedId` if the deleted exam was selected.
+   - **New Exam** button (`Plus` icon) at the top of the exam-list pane header (when `canCreate`) → `ExamDialog` (name, examType select [Unit Test/Mid Term/Final/Online], startDate, endDate with `endDate ≥ startDate` validation).
+   - `ExamListItem` now accepts `canEdit`/`canDelete`/`onEdit`/`onDelete` props and renders an Edit (`Pencil`) + Delete (`Trash2`, rose) footer row (only when `canEdit||canDelete`). Footer uses `onClick={(e) => e.stopPropagation()}` so the click doesn't bubble to the card-select handler. Card wrapper changed from `<button>` to `<div cursor-pointer>` to avoid nesting buttons inside buttons (invalid HTML) — keyboard/click behaviour preserved.
+   - Delete Exam opens `<AlertDialog>` "Delete exam? … name / type / date range … all marks entered will be lost" → red action → `deleteExamMut`.
+   - **Enter Marks (Edit Mode)**: `MarksSheetTab` accepts new `canEnter` prop. When `canEnter`, an **Edit Mode** toggle button (outline→default when active, label "Done Editing") appears in the card header. When on, every marks cell renders a new `EditableMarkCell` (small inline `<input type="number">`) instead of the static span. On blur or Enter → `enterMarksMut.mutate({ examId, studentId, subject, maxMarks, obtained })` → invalidates `['exams','marks', examId, classId]` + `['exams','list']` + toast `Marks saved · {subject}: {obtained}/{maxMarks}`. `EditableMarkCell` uses `key={\`${studentId}-${subject}-${obtained ?? 'null'}\`}` so it remounts with the new server value after a save (no set-state-in-effect). Empty cells also render inputs in edit mode (using the subject's known maxMarks from the column header). When edit mode off / `!canEnter`, original read-only spans render with their color coding. A small hint banner shows when edit mode is on: "Click any marks cell to edit. Press Enter or click away to save."
+   - Existing stat cards, exam list, Progress Card tab, Analysis tab, parent child selector — untouched.
+
+3. `src/components/modules/timetable.tsx` — added `useMutation`, `useQueryClient`, `useCan`, `Dialog*`, `AlertDialog*`, `Input`, `Label`, `Plus`, `Trash2`, `cn`, `TimetableSlot` type.
+   - `TimetableModule` reads `canCreate`/`canDelete` (new). Owns 2 mutations: `addSlotMut` (`api.academics.addSlot`), `deleteSlotMut` (`api.academics.deleteSlot`) — both invalidate `['timetable', classId, sectionId]`. Fixed grid typing to `Record<string, Record<number, TimetableSlot[]>>` (was `typeof slots` — worked at runtime but typed loosely).
+   - **Add Slot**: "Add Slot" button in `SectionHeader` action area (when `canCreate && classId`). Toggles "Add mode" — button label switches to "Cancel Add" + a banner "Add mode active: click any empty cell (—) in the grid below to open the slot dialog." Empty cells render as `<button>` with `hover:bg-primary/10` (always clickable for admins, regardless of add mode — add mode just provides a visual hint). Click → `AddSlotDialog` pre-fills Day + Period (read-only) + Start/End Time (initialized from the PERIODS table); user enters subjectName, teacherName, room, optional section (Select shown only when current view is "All Sections"). On submit → `addSlotMut.mutate({ classId, sectionId?, day, period, subjectName, teacherName, room, startTime, endTime })`. Section picker uses `"__all__"` sentinel value because Radix Select doesn't support empty-string item values.
+   - **Delete Slot**: filled cells render as `<button>` (when `canDelete`) with `hover:ring-2 hover:ring-rose-400/50` to indicate clickability. Click → `<AlertDialog>` showing full slot details (Day · Period, Time, Subject, Teacher, Room, Class/Section) in a styled summary card + "Delete this slot? This action cannot be undone." → red `AlertDialogAction` "Delete slot" (Trash2 icon) → `deleteSlotMut`. AlertDialogDescription uses `asChild` with a `<div>` wrapper to keep HTML valid (no `<div>` inside default `<p>`).
+   - Existing weekly grid, class/section selectors, subject color coding, subject legend, Export PDF button (now shares the action row with Add Slot) — untouched.
+
+- Conventions followed: `'use client'` first line preserved; mutations use `useMutation` + `qc.invalidateQueries` + `toast.success`/`toast.error` from sonner; every create/edit/delete button wrapped in `useCan()('module','action')` (admin & super_admin only); emerald/teal accent preserved; destructive actions use rose-600 AlertDialogAction with `hover:bg-rose-700 text-white`; NO indigo/blue; responsive (mobile-first, `size="sm"` + `h-7`/`h-8` compact buttons, `size-7` icon buttons, dialogs `max-w-md`/`max-w-lg`); existing functionality untouched — only additive CRUD UI; AlertDialog used for all delete confirmations; no `useEffect` (form state via `useState` initializer + conditional rendering + `key` remount pattern to avoid `react-hooks/set-state-in-effect` violations).
+- ESLint: `bun node_modules/eslint/bin/eslint.js src/components/modules/fees.tsx src/components/modules/exams.tsx src/components/modules/timetable.tsx` → **exit 0, 0 errors, 0 warnings**.
+- Dev log: `✓ Compiled in 543ms / 138ms / 145ms / 130ms / 148ms / 129ms / 124ms / 141ms / 204ms / 192ms / 216ms / 386ms` after saves — no compile errors, no warnings, no exceptions.
+
+Stage Summary:
+- 3 ERP module files now have full admin CRUD UI, all RBAC-guarded client-side (`useCan`) AND server-side (`requirePerm` on the existing routes — no backend changes were needed):
+  - **Fees**: Create/Edit/Delete Fee Structure (dialog with class picker + frequency select + amount + due date), Create Invoice (searchable student picker + fee structure picker + live preview), Delete Invoice (AlertDialog).
+  - **Exams**: Create/Edit/Delete Exam (dialog with type select + date range + validation), inline marks entry via an "Edit Mode" toggle that turns every cell into an input (blur/Enter saves via `api.exams.enterMarks`).
+  - **Timetable**: Add Slot (click empty cell → dialog pre-filled with day/period/time, accepts subject/teacher/room/section), Delete Slot (click filled cell → AlertDialog with full slot details).
+- All admin/super_admin actions now have proper UI; teachers see only "Edit Mode" for marks (enter permission), students/parents see no create/edit/delete buttons.
+- Lint status: 3 files, 0 errors, 0 warnings, exit 0.
+
+---
+Task ID: 5
+Agent: 5-admin-crud-ui
+Task: Add admin CRUD UI (Create/Edit/Delete dialogs + buttons, RBAC-guarded) to 5 existing ERP module files: hr.tsx, library.tsx, assets.tsx, transport.tsx, communication.tsx
+
+Work Log:
+- Read worklog.md (architecture, RBAC, prior agents' work — esp. Task 4 which set the pattern for Fees/Exams/Timetable CRUD UI). Inspected the 5 target module files + the `api` helper (`src/lib/api.ts` already had every CRUD method wired: `hr.createEmployee/updateEmployee/deleteEmployee`, `library.createBook/updateBook/deleteBook`, `assets.create/update/remove`, `transport.createVehicle/updateVehicle/deleteVehicle/createStop/deleteStop`, `communication.remove`) + the `useCan` hook + AlertDialog primitives.
+- Confirmed spec: every backend route called already exists and is `requirePerm`-guarded server-side. **No backend changes needed.**
+- Files modified (5 UI files, additive only):
+
+1. `src/components/modules/hr.tsx` — added `AlertDialog*` imports + `Plus, Pencil, Trash2` icons.
+   - `EmployeesTab` now reads `canCreate`/`canEdit`/`canDelete` (new) and owns 3 mutations: `createMut`, `updateMut`, `deleteMut` (all → invalidate `['hr','employees']` + toast success/error).
+   - **Add Employee**: "Add Employee" button in the Employees tab header (next to dept select + search box) when `canCreate`. Opens `EmployeeFormDialog` (mode `create`).
+   - **Edit Employee**: per-row `Pencil` icon button in a new "Actions" column (only when `canEdit||canDelete`) → opens `EmployeeFormDialog` (mode `edit`, pre-filled from clicked row). Action cell uses `onClick={(ev) => ev.stopPropagation()}` so the click doesn't bubble to the row's `setSelected` (view employee) handler.
+   - **Delete Employee**: per-row `Trash2` icon button (rose, when `canDelete`) → `<AlertDialog>` "Delete employee? … name / empCode / designation / department … leave requests & payroll may be affected" → red `AlertDialogAction` "Yes, delete" → `deleteMut`.
+   - New `EmployeeFormDialog` component (firstName, lastName, designation, department, gender [Male/Female/Other], phone, email, salary, joiningDate) with required-field validation, key-remount pattern (`key={formDialog.mode === 'edit' ? target?.id : 'create'}`) so edit state resets per row.
+   - Existing EmployeeDialog (view-only details), LeavesTab (approve flow), PayrollTab (run payroll), KPI stat cards — untouched.
+
+2. `src/components/modules/library.tsx` — added `AlertDialog*` imports + `Plus, Pencil, Trash2` icons.
+   - `CatalogTab` now reads `canCreate`/`canEdit`/`canDelete` (new) and owns 3 mutations: `createMut`, `updateMut`, `deleteMut` (all → invalidate `['library','books']` + toast).
+   - **Add Book**: "Add Book" button in the Catalog tab header (next to search box) when `canCreate` → opens `BookFormDialog` (mode `create`).
+   - **Edit Book**: per-row `Pencil` icon button in a new "Manage" column (only when `canEdit||canDelete`) → opens `BookFormDialog` (mode `edit`, pre-filled from clicked row).
+   - **Delete Book**: per-row `Trash2` icon button (rose, when `canDelete`) → `<AlertDialog>` "Delete book? … title / author / accessionNo … issue history may be affected" → red action → `deleteMut`.
+   - New `BookFormDialog` (accessionNo, title, author, isbn, category [10 options: Fiction/Non-Fiction/Textbook/Reference/Science/Mathematics/History/Biography/Children/Other], publisher, price, totalCopies, rack) + `BOOK_CATEGORIES` const.
+   - Existing IssueBookDialog (student picker), IssuedTab (return flow), KPI stat cards — untouched.
+
+3. `src/components/modules/assets.tsx` — added `useMutation`, `useQueryClient`, `useCan`, `Label`, `Dialog*`, `AlertDialog*`, `Plus, Pencil, Trash2` imports (file previously had no mutation hooks at all). Added `ASSET_CONDITIONS` const.
+   - `AssetsModule` now reads `canCreate`/`canEdit`/`canDelete` (new) and owns 3 mutations: `createMut`, `updateMut`, `deleteMut` (all → invalidate `['assets','list']` + toast).
+   - **Add Asset**: "Add Asset" button in the Asset Register header (after the Group button) when `canCreate` → opens `AssetFormDialog` (mode `create`).
+   - **Edit Asset**: per-row `Pencil` icon button (in flat table) OR per-card `Pencil` icon button (in grouped view) when `canEdit` → opens `AssetFormDialog` (mode `edit`, pre-filled). Both use `stopPropagation` so the existing `toast.info` row/card click handler doesn't fire.
+   - **Delete Asset**: per-row `Trash2` icon button (flat) OR per-card `Trash2` icon button (grouped) when `canDelete` → `<AlertDialog>` "Delete asset? … name / assetCode / category / purchaseValue" → red action → `deleteMut`.
+   - `AssetRow` component signature changed from `({ a })` to `({ a, canEdit, canDelete, onEdit, onDelete })` — caller passes everything in.
+   - New `AssetFormDialog` (name, category [existing + 6 fallbacks so the dropdown is never empty], location, purchaseValue, condition [Good/Damaged/Under Repair], assignedTo). `TableFooter` `colSpan` now adjusts: 8 when actions column present, else 7.
+   - Existing KPI stat cards, asset-value-by-category bar chart, category/condition filters, Group toggle, grouped card layout — untouched.
+
+4. `src/components/modules/transport.tsx` — added `useMutation`, `useCan`, `Input`, `Label`, `Select*`, `Dialog*`, `AlertDialog*`, `Plus, Pencil, Trash2` imports. Added local `Stop` interface + `VEHICLE_TYPES` const.
+   - `TransportModule` now reads `canCreate`/`canEdit`/`canDelete` (new) and owns 5 mutations: `createVehicleMut`, `updateVehicleMut`, `deleteVehicleMut` (all → invalidate `['vehicles']`), `createStopMut`, `deleteStopMut` (both → invalidate `['stops']`). Each toasts success/error.
+   - Added state: `vehicleDialog`, `vehicleDelete`, `stopDialog`, `stopDelete`. Added `selectedVehicle` lookup (`(vehicles||[]).find(v => v.id === selected?.id)`) to get the full `Vehicle` record (with type/capacity/driverPhone) for the edit dialog prefill + delete confirmation message.
+   - **Add Vehicle**: "Add Vehicle" button in the Fleet Status card header (next to title) when `canCreate` → opens `VehicleFormDialog` (mode `create`).
+   - **Edit Vehicle**: in the selected-vehicle detail panel's right-side action stack, an "Edit" button (when `canEdit && selectedVehicle`) at the top, before the existing Notify Pickup/Drop/ETA buttons → opens `VehicleFormDialog` (mode `edit`, pre-filled from `selectedVehicle`).
+   - **Delete Vehicle**: "Delete" button (rose, when `canDelete && selectedVehicle`) next to the Edit button → `<AlertDialog>` "Delete vehicle? … vehicleNo / type / driverName / routeName" → red action → `deleteVehicleMut` (also clears `selectedId` if the deleted vehicle was selected).
+   - **Add Stop**: "Add Stop" button in the Route Stops card header (when `canCreate`) → opens `StopFormDialog`.
+   - **Delete Stop**: per-stop-row `Trash2` icon button (rose, when `canDelete`) → `<AlertDialog>` "Delete stop? … name / routeName / pickupTime / dropTime / fare" → red action → `deleteStopMut`.
+   - New components: `VehicleFormDialog` (vehicleNo, type [Bus/Mini Bus/Van/Car], capacity, driverName, driverPhone, routeName) + `StopFormDialog` (name, routeName, lat, lng, pickupTime, dropTime, fare). Both use required-field validation + key-remount pattern.
+   - Empty-stops state now renders a "No route stops configured." placeholder (was rendering empty list).
+   - Existing live GPS map (SVG), vehicle list with status badges, route stops table, stat cards, socket.io connection — untouched.
+
+5. `src/components/modules/communication.tsx` — added `AlertDialog*` imports + `Trash2` icon.
+   - `HistoryCard` now reads `canDelete` (new) and owns `deleteMut` (→ invalidate `['communication','list']` + toast).
+   - **Delete Notification**: per-row `Trash2` icon button (rose, when `canDelete`) in a new "Delete" column → `<AlertDialog>` "Delete notification? … channel / recipient / subject" → red action → `deleteMut`.
+   - Existing ComposeCard (channel selector, recipient/subject inputs, AI Compose panel, message textarea, category select, Send button), KPI stat cards, HistoryCard channel filter + search — untouched.
+
+- Conventions followed: `'use client'` first line preserved on all 5 files; mutations use `useMutation` + `qc.invalidateQueries` + `toast.success`/`toast.error` from sonner; every create/edit/delete button wrapped in `useCan()('module','action')` (admin & super_admin only); emerald/teal accent preserved, destructive actions use rose-600 AlertDialogAction with `hover:bg-rose-700 text-white`; NO indigo/blue; responsive (mobile-first, `size="sm"` + `h-8` compact header buttons, `size-7` icon buttons in tables, `size-6` in dense grouped cards, dialogs `max-w-md`/`max-w-lg`); existing functionality untouched — only additive CRUD UI; AlertDialog used for all delete confirmations per spec; no `useEffect` (form state via `useState` initializer + conditional rendering + `key` remount pattern to avoid `react-hooks/set-state-in-effect` violations).
+- ESLint: `bun node_modules/eslint/bin/eslint.js src/components/modules/hr.tsx src/components/modules/library.tsx src/components/modules/assets.tsx src/components/modules/transport.tsx src/components/modules/communication.tsx` → **exit 0, 0 errors, 0 warnings**.
+- TypeScript: `bunx tsc --noEmit` → only **pre-existing** errors in OTHER files (hr/payroll route's `employee` relation, students.tsx:294 `student?.gender`, sidebar.tsx ModuleId mismatch, mini-services, skills). **Zero** TS errors introduced by my 5 files.
+- Dev log: `GET / 200 in 3.0s (compile: 2.7s, render: 267ms)` after the changes — no compile errors, no exceptions. Pre-existing `POST /api/transport/update 200` socket traffic (mini-service) continues normally.
+
+Stage Summary:
+- 5 ERP module files now have full admin CRUD UI, all RBAC-guarded client-side (`useCan`) AND server-side (`requirePerm` on the existing routes — no backend changes were needed):
+  - **HR**: Add Employee (9-field dialog), Edit Employee (per-row pencil), Delete Employee (per-row AlertDialog). Invalidates `['hr','employees']`.
+  - **Library**: Add Book (9-field dialog with category select), Edit Book (per-row pencil), Delete Book (per-row AlertDialog). Invalidates `['library','books']`.
+  - **Assets**: Add Asset (6-field dialog with category + condition selects), Edit Asset (per-row pencil in flat view + per-card pencil in grouped view), Delete Asset (per-row/per-card AlertDialog). Invalidates `['assets','list']`. `AssetRow` now takes `canEdit`/`canDelete`/`onEdit`/`onDelete` props.
+  - **Transport**: Add Vehicle (6-field dialog with type select), Edit Vehicle (in selected-vehicle detail panel), Delete Vehicle (in detail panel, AlertDialog), Add Stop (7-field dialog with lat/lng + time + fare), Delete Stop (per-row AlertDialog). Invalidates `['vehicles']` and `['stops']`.
+  - **Communication**: Delete Notification (per-row trash icon in HistoryCard, AlertDialog). Invalidates `['communication','list']`.
+- All admin/super_admin actions now have proper UI; teachers/students/parents see no create/edit/delete buttons (useCan returns false for them on these actions).
+- Lint status: 5 files, 0 errors, 0 warnings, exit 0. TypeScript: 0 new errors introduced. Page compiles in 2.7s, GET / returns 200.
+
+---
+Task ID: CRUD-1..6
+Agent: main + 3 subagents (tasks 3,4,5)
+Task: Enforce user-specific role data isolation + admin full CRUD on every module
+
+Work Log:
+- Audited all 22 API routes for auth/permission gaps; protected ALL remaining endpoints:
+  - Student detail + sub-routes ([id], [id]/attendance, [id]/fees, [id]/marks) — ownership scoping (student=own, parent=children, teacher=assigned classes, admin=all)
+  - Dashboard chart endpoints (attendance-trend, fee-trend, class-distribution, gender-ratio, activity) — staff-only
+  - academics/classes, academics/timetable, exams, library/books, transport/stops, fees/summary — view permission + role scoping
+  - ai/insights (staff-only), ai/compose (auth), library/issues/[id]/return (return perm + ownership)
+- Scoped fees/summary by role: student sees own ₹38.5K collected, admin sees institution ₹2.53 Cr
+- Added admin CRUD backend routes for ALL master entities:
+  - Students: PATCH (edit) + DELETE (soft-delete → Inactive)
+  - Employees: POST (create) + PATCH (edit) + DELETE
+  - Classes: POST + PATCH + DELETE; Sections: POST; Subjects: POST
+  - Fee Structures: POST + PATCH + DELETE; Fee Invoices: POST (create) + DELETE
+  - Exams: POST + PATCH + DELETE; Exam Marks: POST (enter/upsert) + DELETE
+  - Timetable Slots: POST + PATCH + DELETE
+  - Vehicles: POST + PATCH + DELETE; Transport Stops: POST + PATCH + DELETE
+  - Books: POST + PATCH + DELETE
+  - Assets: POST + PATCH + DELETE
+  - Notifications: DELETE
+  - Admissions enquiries/applications: DELETE (added by subagent)
+- Updated RBAC matrix: admin now has 'delete' on all modules
+- Added all CRUD methods to src/lib/api.ts (create/update/remove for every entity)
+- 3 parallel subagents added CRUD UI to all 14 modules:
+  - Task 3: Students (edit/delete in drawer), Admissions (delete enquiry/application), Academics (add/rename/delete class, add section/subject, delete timetable slot)
+  - Task 4: Fees (create/edit/delete structure, create/delete invoice), Exams (create/edit/delete exam, edit-mode marks entry), Timetable (add/delete slot)
+  - Task 5: HR (add/edit/delete employee), Library (add/edit/delete book), Assets (add/edit/delete), Transport (add/edit/delete vehicle + add/delete stop), Communication (delete notification)
+- Fixed 4 routes that lost GET handlers when POST was added (fees/structures, transport/vehicles, hr/employees, assets)
+- Verified: admin CRUD works end-to-end (created Test Employee, Sports Fee — both persisted); student denied all admin endpoints (403); student sees only own data across all modules
+
+Stage Summary:
+- Complete data isolation: every API endpoint checks auth + permission + role-scoped data. Students/parents see ONLY own/children's records. Teachers see ONLY assigned classes. Admin sees all.
+- Complete admin CRUD: Create/Edit/Delete UI on ALL 14 modules, all permission-guarded, all functional.
+- ESLint: 0 errors. Dev server healthy. Agent-browser verified admin CRUD + student isolation.

@@ -22,12 +22,16 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@/components/ui/select'
 import {
   Users, CalendarOff, CalendarClock, Wallet, Search, UserCheck, BadgeCheck,
   ShieldCheck, Crown, Ban, FileText, PlayCircle, IndianRupee, Mail, Phone, MapPin,
-  ShieldAlert,
+  ShieldAlert, Plus, Pencil, Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -57,9 +61,45 @@ function dayCount(start: string, end: string) {
 
 // ============ Employees Tab ============
 function EmployeesTab({ employees }: { employees: Employee[] }) {
+  const qc = useQueryClient()
+  const canCreate = useCan()('hr', 'create')
+  const canEdit = useCan()('hr', 'edit')
+  const canDelete = useCan()('hr', 'delete')
   const [q, setQ] = useState('')
   const [dept, setDept] = useState('all')
   const [selected, setSelected] = useState<Employee | null>(null)
+  const [formDialog, setFormDialog] = useState<{ mode: 'create' | 'edit'; target?: Employee } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null)
+
+  const createMut = useMutation({
+    mutationFn: (data: any) => api.hr.createEmployee(data),
+    onSuccess: () => {
+      toast.success('Employee added', { description: 'The new employee record has been created.' })
+      qc.invalidateQueries({ queryKey: ['hr', 'employees'] })
+      setFormDialog(null)
+    },
+    onError: () => toast.error('Failed to add employee'),
+  })
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.hr.updateEmployee(id, data),
+    onSuccess: () => {
+      toast.success('Employee updated', { description: 'The employee record has been saved.' })
+      qc.invalidateQueries({ queryKey: ['hr', 'employees'] })
+      setFormDialog(null)
+    },
+    onError: () => toast.error('Failed to update employee'),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.hr.deleteEmployee(id),
+    onSuccess: () => {
+      toast.success('Employee deleted', { description: 'The employee record has been removed.' })
+      qc.invalidateQueries({ queryKey: ['hr', 'employees'] })
+      setDeleteTarget(null)
+    },
+    onError: () => toast.error('Failed to delete employee'),
+  })
 
   const depts = Array.from(new Set(employees.map((e) => e.department))).sort()
   const filtered = employees.filter((e) => {
@@ -68,6 +108,8 @@ function EmployeesTab({ employees }: { employees: Employee[] }) {
     const s = q.toLowerCase()
     return e.fullName.toLowerCase().includes(s) || e.empCode.toLowerCase().includes(s) || e.designation.toLowerCase().includes(s) || (e.email || '').toLowerCase().includes(s)
   })
+
+  const canRowActions = canEdit || canDelete
 
   return (
     <Card>
@@ -89,6 +131,11 @@ function EmployeesTab({ employees }: { employees: Employee[] }) {
               <Search className="size-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, code, email…" className="pl-9" />
             </div>
+            {canCreate && (
+              <Button className="gap-1.5 shrink-0" onClick={() => setFormDialog({ mode: 'create' })}>
+                <Plus className="size-4" /> <span className="hidden sm:inline">Add Employee</span><span className="sm:hidden">Add</span>
+              </Button>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -108,6 +155,7 @@ function EmployeesTab({ employees }: { employees: Employee[] }) {
                   <TableHead className="hidden xl:table-cell">Joined</TableHead>
                   <TableHead className="text-right">Salary</TableHead>
                   <TableHead>Status</TableHead>
+                  {canRowActions && <TableHead className="text-right w-24">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -129,6 +177,22 @@ function EmployeesTab({ employees }: { employees: Employee[] }) {
                     <TableCell className="hidden xl:table-cell text-xs text-muted-foreground">{fmtDate(e.joiningDate)}</TableCell>
                     <TableCell className="text-right text-xs tabular-nums">{fmtINR(e.salary)}</TableCell>
                     <TableCell><StatusBadge status={e.status} /></TableCell>
+                    {canRowActions && (
+                      <TableCell className="text-right" onClick={(ev) => ev.stopPropagation()}>
+                        <div className="flex justify-end gap-1">
+                          {canEdit && (
+                            <Button size="icon" variant="ghost" className="size-7" title="Edit employee" onClick={() => setFormDialog({ mode: 'edit', target: e })}>
+                              <Pencil className="size-3.5" />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <Button size="icon" variant="ghost" className="size-7 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10" title="Delete employee" onClick={() => setDeleteTarget(e)}>
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -138,7 +202,150 @@ function EmployeesTab({ employees }: { employees: Employee[] }) {
       </CardContent>
 
       <EmployeeDialog employee={selected} open={!!selected} onOpenChange={(v) => !v && setSelected(null)} />
+
+      {formDialog && (
+        <EmployeeFormDialog
+          key={formDialog.mode === 'edit' ? formDialog.target?.id : 'create'}
+          mode={formDialog.mode}
+          target={formDialog.target}
+          loading={createMut.isPending || updateMut.isPending}
+          onClose={() => setFormDialog(null)}
+          onSubmit={(data) => {
+            if (formDialog.mode === 'edit' && formDialog.target) {
+              updateMut.mutate({ id: formDialog.target.id, data })
+            } else {
+              createMut.mutate(data)
+            }
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <AlertDialog open onOpenChange={(o) => { if (!o) setDeleteTarget(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete employee?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete <strong>{deleteTarget.fullName}</strong> ({deleteTarget.empCode}) — {deleteTarget.designation}, {deleteTarget.department}. All related leave requests and payroll records may also be affected. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-rose-600 hover:bg-rose-700 text-white"
+                onClick={() => deleteMut.mutate(deleteTarget.id)}
+                disabled={deleteMut.isPending}
+              >
+                {deleteMut.isPending ? 'Deleting…' : 'Yes, delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </Card>
+  )
+}
+
+// ============ Employee Create/Edit Dialog ============
+function EmployeeFormDialog({
+  mode, target, loading, onClose, onSubmit,
+}: {
+  mode: 'create' | 'edit'
+  target?: Employee
+  loading: boolean
+  onClose: () => void
+  onSubmit: (data: any) => void
+}) {
+  const [firstName, setFirstName] = useState(target?.firstName ?? '')
+  const [lastName, setLastName] = useState(target?.lastName ?? '')
+  const [designation, setDesignation] = useState(target?.designation ?? '')
+  const [department, setDepartment] = useState(target?.department ?? '')
+  const [gender, setGender] = useState(target?.gender ?? 'Male')
+  const [phone, setPhone] = useState(target?.phone ?? '')
+  const [email, setEmail] = useState(target?.email ?? '')
+  const [salary, setSalary] = useState(target ? String(target.salary) : '')
+  const [joiningDate, setJoiningDate] = useState(target?.joiningDate ? target.joiningDate.slice(0, 10) : new Date().toISOString().slice(0, 10))
+
+  const valid = firstName.trim() && lastName.trim() && designation.trim() && department.trim() && phone.trim() && Number(salary) >= 0
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCheck className="size-4 text-primary" />
+            {mode === 'create' ? 'Add Employee' : 'Edit Employee'}
+          </DialogTitle>
+          <DialogDescription>
+            {mode === 'create' ? 'Create a new staff record. Fields marked with * are required.' : `Update details for ${target?.fullName} (${target?.empCode}).`}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 py-1">
+          <div className="space-y-1.5">
+            <Label htmlFor="emp-first">First Name *</Label>
+            <Input id="emp-first" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Ravi" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="emp-last">Last Name *</Label>
+            <Input id="emp-last" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Sharma" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="emp-desg">Designation *</Label>
+            <Input id="emp-desg" value={designation} onChange={(e) => setDesignation(e.target.value)} placeholder="Maths Teacher" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="emp-dept">Department *</Label>
+            <Input id="emp-dept" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Mathematics" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Gender</Label>
+            <Select value={gender} onValueChange={setGender}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Male">Male</SelectItem>
+                <SelectItem value="Female">Female</SelectItem>
+                <SelectItem value="Other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="emp-phone">Phone *</Label>
+            <Input id="emp-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98765 43210" />
+          </div>
+          <div className="space-y-1.5 col-span-2 sm:col-span-1">
+            <Label htmlFor="emp-email">Email</Label>
+            <Input id="emp-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ravi.sharma@school.edu" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="emp-salary">Monthly Salary (₹) *</Label>
+            <Input id="emp-salary" type="number" min="0" value={salary} onChange={(e) => setSalary(e.target.value)} placeholder="35000" />
+          </div>
+          <div className="space-y-1.5 col-span-2">
+            <Label htmlFor="emp-join">Joining Date *</Label>
+            <Input id="emp-join" type="date" value={joiningDate} onChange={(e) => setJoiningDate(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={!valid || loading}
+            onClick={() => onSubmit({
+              firstName: firstName.trim(),
+              lastName: lastName.trim(),
+              designation: designation.trim(),
+              department: department.trim(),
+              gender,
+              phone: phone.trim(),
+              email: email.trim() || undefined,
+              salary: Number(salary),
+              joiningDate,
+            })}
+          >
+            {loading ? 'Saving…' : mode === 'create' ? 'Create Employee' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

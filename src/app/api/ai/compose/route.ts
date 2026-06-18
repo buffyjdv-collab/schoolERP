@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ZAI from 'z-ai-web-dev-sdk'
+import { getCurrentUser } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
+  const user = await getCurrentUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { channel, topic, audience } = await req.json()
   try {
     const zai = await ZAI.create()
