@@ -10,7 +10,7 @@ import {
 import type { Role, ModuleId, Action, DataScope } from '@/lib/rbac'
 import {
   ShieldCheck, Users, Search, ChevronRight, Lock, Unlock, RotateCcw, Save,
-  UserCircle, Mail, Calendar, Power, AlertTriangle, Check, X, Info,
+  UserCircle, Mail, Calendar, Power, AlertTriangle, Check, X, Info, UsersRound,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -52,6 +53,38 @@ interface UserRow {
 }
 
 export function UserManagementModule() {
+  const [tab, setTab] = useState('users')
+
+  return (
+    <div className="space-y-5">
+      {/* Header banner */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 to-primary text-white p-5">
+        <div className="absolute inset-0 bg-grid opacity-20" />
+        <div className="relative flex items-center gap-3">
+          <ShieldCheck className="size-8" />
+          <div className="flex-1">
+            <h2 className="text-lg font-bold">Advanced Access Control</h2>
+            <p className="text-sm opacity-90">
+              Manage roles, assign/de-assign modules, customize CRUD permissions, and set data restrictions
+              at the role level (applies to all users of that role) or per individual user.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="users" className="gap-1.5"><Users className="size-3.5" /> User Management</TabsTrigger>
+          <TabsTrigger value="roles" className="gap-1.5"><UsersRound className="size-3.5" /> Role Management</TabsTrigger>
+        </TabsList>
+        <TabsContent value="users" className="mt-4"><UsersTab /></TabsContent>
+        <TabsContent value="roles" className="mt-4"><RolesTab /></TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+function UsersTab() {
   const { user: currentUser } = useStore()
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -71,25 +104,6 @@ export function UserManagementModule() {
 
   return (
     <div className="space-y-5">
-      {/* Header banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 to-primary text-white p-5">
-        <div className="absolute inset-0 bg-grid opacity-20" />
-        <div className="relative flex items-center gap-3">
-          <ShieldCheck className="size-8" />
-          <div className="flex-1">
-            <h2 className="text-lg font-bold">Advanced Access Control</h2>
-            <p className="text-sm opacity-90">
-              Assign roles, toggle module access, customize CRUD permissions, and set data restrictions for each user.
-              Changes take effect immediately on the user's next request.
-            </p>
-          </div>
-          <div className="hidden sm:block text-right">
-            <div className="text-2xl font-bold">{users.length}</div>
-            <div className="text-xs opacity-90">Total Users</div>
-          </div>
-        </div>
-      </div>
-
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <SummaryCard label="Total Users" value={users.length} icon={Users} />
@@ -100,7 +114,6 @@ export function UserManagementModule() {
 
       {/* User list + permission editor */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        {/* User list */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -152,7 +165,6 @@ export function UserManagementModule() {
           </CardContent>
         </Card>
 
-        {/* Permission editor */}
         <div className="lg:col-span-3">
           {selectedId ? (
             <PermissionEditor userId={selectedId} onClose={() => setSelectedId(null)} />
@@ -171,6 +183,238 @@ export function UserManagementModule() {
         </div>
       </div>
     </div>
+  )
+}
+
+// ============ Role Management Tab ============
+
+function RolesTab() {
+  const [selectedRole, setSelectedRole] = useState<string>('')
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-roles'],
+    queryFn: api.admin.roles,
+  })
+
+  const roles = data?.roles || []
+  const selected = roles.find(r => r.role === selectedRole)
+
+  return (
+    <div className="space-y-4">
+      {/* Role cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        {isLoading ? Array.from({length: 5}).map((_,i) => <Skeleton key={i} className="h-28" />) :
+          roles.map(r => (
+            <button
+              key={r.role}
+              onClick={() => setSelectedRole(r.role)}
+              className={`text-left p-4 rounded-xl border transition-all ${selectedRole === r.role ? 'border-primary bg-primary/5 shadow-sm' : 'hover:border-primary/40'}`}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <div className={`size-8 rounded-lg grid place-items-center ${ROLE_COLORS[r.role]}`}>
+                  <UsersRound className="size-4" />
+                </div>
+                <div className="text-sm font-semibold">{r.label}</div>
+              </div>
+              <p className="text-[10px] text-muted-foreground line-clamp-2 mb-2">{r.description}</p>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-muted-foreground">{r.userCount} users</span>
+                <Badge variant="outline" className="text-[9px]">{r.moduleCount}/{ALL_MODULES.length} modules</Badge>
+              </div>
+            </button>
+          ))
+        }
+      </div>
+
+      {/* Permission matrix editor for selected role */}
+      {selected ? (
+        <RolePermissionEditor role={selected} />
+      ) : (
+        <Card className="grid place-items-center py-12">
+          <CardContent className="text-center">
+            <UsersRound className="size-12 text-muted-foreground/30 mx-auto mb-3" />
+            <p className="text-sm font-medium">Select a role to customize its permissions</p>
+            <p className="text-xs text-muted-foreground mt-1 max-w-md">
+              Changes apply to ALL users with that role. Individual user overrides take precedence over role defaults.
+              Super Admin role is locked and cannot be modified.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+function RolePermissionEditor({ role }: { role: any }) {
+  const qc = useQueryClient()
+  const [overrides, setOverrides] = useState<Record<string, any>>({})
+  const [loaded, setLoaded] = useState(false)
+
+  const { data } = useQuery({
+    queryKey: ['role-perms', role.role],
+    queryFn: () => api.admin.getRolePermissions(role.role),
+  })
+
+  if (data && !loaded) {
+    setOverrides(data.overrides || {})
+    setLoaded(true)
+  }
+
+  const saveMut = useMutation({
+    mutationFn: (ov: any) => api.admin.saveRolePermissions(role.role, ov),
+    onSuccess: () => {
+      toast.success(`Permissions saved for ${ROLE_LABELS[role.role as Role]}`, { description: 'All users with this role are affected immediately.' })
+      qc.invalidateQueries({ queryKey: ['admin-roles'] })
+      qc.invalidateQueries({ queryKey: ['role-perms', role.role] })
+      qc.invalidateQueries({ queryKey: ['admin-users'] })
+    },
+    onError: (e: any) => toast.error('Failed: ' + e.message),
+  })
+
+  const resetMut = useMutation({
+    mutationFn: () => api.admin.resetRolePermissions(role.role),
+    onSuccess: () => {
+      toast.success(`Reset to default for ${ROLE_LABELS[role.role as Role]}`)
+      setOverrides({})
+      qc.invalidateQueries({ queryKey: ['admin-roles'] })
+      qc.invalidateQueries({ queryKey: ['role-perms', role.role] })
+    },
+  })
+
+  const updateOverride = (module: string, field: string, value: any) => {
+    setOverrides(prev => {
+      const cur = { ...prev[module] } || {}
+      cur[field] = value
+      return { ...prev, [module]: cur }
+    })
+  }
+
+  const roleKey = role.role as Role
+  const staticDefaults = PERMISSIONS[roleKey] || {}
+
+  return (
+    <Card className="flex flex-col">
+      {/* Role header */}
+      <div className={`p-4 border-b bg-gradient-to-r ${role.role === 'admin' ? 'from-primary/5' : role.role === 'transport_manager' ? 'from-teal-500/5' : role.role === 'teacher' ? 'from-cyan-500/5' : role.role === 'student' ? 'from-amber-500/5' : 'from-sky-500/5'} to-transparent`}>
+        <div className="flex items-center gap-3">
+          <div className={`size-10 rounded-xl grid place-items-center ${ROLE_COLORS[role.role]}`}>
+            <UsersRound className="size-5" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-base">{ROLE_LABELS[roleKey]}</h3>
+              <Badge variant="outline" className="text-[10px]">{role.userCount} users</Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">{ROLE_DESCRIPTIONS[roleKey]}</p>
+          </div>
+          <div className="flex gap-1.5">
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => resetMut.mutate()} disabled={resetMut.isPending}>
+              <RotateCcw className="size-3" /> Reset
+            </Button>
+            <Button size="sm" className="h-7 text-xs gap-1" onClick={() => saveMut.mutate(overrides)} disabled={saveMut.isPending}>
+              <Save className="size-3" /> {saveMut.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </div>
+        <div className="mt-3 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-start gap-2">
+          <AlertTriangle className="size-3.5 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-[11px] text-amber-700 dark:text-amber-300">
+            Changes here affect <b>all {role.userCount} users</b> with the {ROLE_LABELS[roleKey]} role. Individual user overrides (in User Management) take precedence over these role defaults.
+          </p>
+        </div>
+      </div>
+
+      {/* Permission matrix */}
+      <ScrollArea className="max-h-[60vh]">
+        <div className="p-4 space-y-3">
+          {ALL_MODULES.map(module => {
+            const ov = overrides[module] || {}
+            const roleActions = staticDefaults[module] || []
+            const moduleEnabled = ov.enabled !== false && roleActions.length > 0
+            const effectiveActions = ov.enabled === false ? [] : (ov.actions !== undefined && ov.actions !== null ? ov.actions : roleActions)
+            const isCustom = ov && Object.values(ov).some(v => v !== undefined && v !== null)
+            const relevantActions = MODULE_ACTIONS[module] || ['view']
+
+            return (
+              <div key={module} className={`rounded-lg border ${isCustom ? 'border-amber-500/40 bg-amber-500/5' : 'border-border'}`}>
+                <div className="flex items-center gap-3 p-3">
+                  <Switch checked={moduleEnabled} onCheckedChange={(v) => updateOverride(module, 'enabled', v)} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{MODULE_LABELS[module]}</span>
+                      {isCustom && <Badge className="text-[9px] h-4 bg-amber-500/15 text-amber-700">Custom</Badge>}
+                      {!moduleEnabled && <Badge variant="destructive" className="text-[9px] h-4">Disabled</Badge>}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground truncate">{MODULE_DESCRIPTIONS[module]}</p>
+                  </div>
+                  {moduleEnabled && (roleKey === 'teacher' || roleKey === 'student' || roleKey === 'parent' || roleKey === 'transport_manager') && (
+                    <Select
+                      value={ov.dataScope || (roleKey === 'student' ? 'own' : roleKey === 'parent' ? 'children' : roleKey === 'teacher' ? 'assigned_classes' : 'all')}
+                      onValueChange={(v) => updateOverride(module, 'dataScope', v)}
+                    >
+                      <SelectTrigger className="w-36 h-7 text-[11px]"><Lock className="size-2.5 mr-1" /><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(SCOPE_LABELS).map(([k, v]) => (
+                          <SelectItem key={k} value={k} className="text-xs">{v}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+                {moduleEnabled && (
+                  <div className="px-3 pb-3 flex flex-wrap gap-1.5">
+                    {relevantActions.map(action => {
+                      const checked = effectiveActions.includes(action)
+                      const roleHas = roleActions.includes(action)
+                      const isOverridden = ov.actions !== undefined && ov.actions !== null
+                      return (
+                        <button
+                          key={action}
+                          onClick={() => {
+                            const cur = ov.actions !== undefined && ov.actions !== null ? [...ov.actions] : [...roleActions]
+                            const idx = cur.indexOf(action)
+                            if (idx >= 0) cur.splice(idx, 1)
+                            else cur.push(action)
+                            if (cur.length > 0 && !cur.includes('view')) cur.push('view')
+                            updateOverride(module, 'actions', cur)
+                          }}
+                          className={`px-2 py-1 rounded-md text-[10px] font-medium border transition-colors cursor-pointer hover:border-primary/40 ${
+                            checked
+                              ? isOverridden ? 'bg-amber-500/15 text-amber-700 border-amber-500/40' : 'bg-primary/10 text-primary border-primary/20'
+                              : 'bg-muted text-muted-foreground border-border'
+                          }`}
+                          title={roleHas ? 'In role default' : 'Custom'}
+                        >
+                          {ACTION_LABELS[action]}
+                        </button>
+                      )
+                    })}
+                    {ov.actions !== undefined && ov.actions !== null && (
+                      <button onClick={() => updateOverride(module, 'actions', null)} className="px-2 py-1 rounded-md text-[10px] text-muted-foreground hover:text-foreground">
+                        ↺ Reset to default
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          <div className="p-3 rounded-lg bg-primary/5 border border-primary/20 flex items-start gap-2">
+            <Info className="size-4 text-primary shrink-0 mt-0.5" />
+            <div className="text-xs text-muted-foreground">
+              <p className="font-medium text-foreground mb-0.5">Role-level vs User-level</p>
+              <ul className="space-y-0.5 list-disc list-inside">
+                <li><b>Role changes</b> apply to ALL users with this role immediately.</li>
+                <li><b>User overrides</b> (in User Management tab) take precedence over role defaults.</li>
+                <li><b>Data scope</b> controls which records the role sees (own/children/assigned classes/all).</li>
+                <li><b>Super Admin</b> role is always locked — full access, cannot be restricted.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </ScrollArea>
+    </Card>
   )
 }
 

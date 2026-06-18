@@ -660,3 +660,30 @@ Stage Summary:
 - Changes take effect immediately on the user's next API request (session cookie persists, but requirePerm() checks live DB overrides).
 - Super admin cannot be restricted (always full access). Cannot modify own role/permissions.
 - ESLint: 0 errors. Agent-browser verified restrict/enforce/reset cycle.
+
+---
+Task ID: ROLE-1..6
+Agent: main
+Task: Super Admin role-based permission management — assign/de-assign modules, CRUD, data restrictions per ROLE (group-based)
+
+Work Log:
+- Schema: added RolePermission model (role, module, actions JSON, dataScope, enabled) with @@unique([role, module]). Stores per-role DB overrides that apply to ALL users with that role.
+- RBAC engine (rbac.ts): added RoleOverride/RoleOverrides types, in-memory roleOverridesCache, setRoleOverridesCache(), roleEffectiveActions(), roleEffectiveDataScope(). Updated effectiveActions() and effectiveDataScope() to check: user override → role DB override → static PERMISSIONS. Super_admin always full access.
+- Auth (auth.ts): loadRoleOverridesOnce() loads ALL RolePermission rows into cache on first getCurrentUser() call per request. resetRoleOverridesCache() clears cache when super admin saves role changes (so new overrides take effect immediately). getCurrentUser() calls loadRoleOverridesOnce() before returning.
+- Backend API:
+  - GET /api/admin/roles — lists all 5 non-super-admin roles with effective permissions (static + DB overrides), user counts, module counts
+  - GET /api/admin/roles/[role] — static defaults + DB overrides for one role
+  - PUT /api/admin/roles/[role] — save per-module role overrides (actions, dataScope, enabled); resets cache
+  - DELETE /api/admin/roles/[role] — reset all role overrides to static code defaults; resets cache
+  - Super_admin role is locked (400 error if trying to modify)
+- UI: User Management module now has 2 tabs:
+  - "User Management" (existing per-user editor)
+  - "Role Management" (NEW): 5 role cards (Admin, Transport Manager, Teacher, Student, Parent) with user counts + module counts; clicking opens RolePermissionEditor with per-module switches, action chips, data scope dropdown, Save/Reset; warning banner "Changes affect all N users"; help panel explaining role-level vs user-level
+- Verified end-to-end: super admin restricted Teacher role from Transport + Library → teacher's Transport API returned 403 → Library API 403 → Students API still 200 → super admin reset Teacher role → Transport + Library restored to 200. Full cycle: restrict → enforce → reset → restore.
+
+Stage Summary:
+- Super Admin now has GROUP-BASED control: customize the permission matrix for an entire role (Student, Parent, Teacher, Admin, Transport Manager) and it applies to ALL users with that role immediately.
+- Two levels of control: ROLE-level (group, applies to all users of that role) + USER-level (individual, takes precedence over role defaults).
+- Both levels support: module enable/disable, CRUD action toggles, data scope (all/own/children/assigned_classes/none).
+- Super Admin role is always locked (cannot be restricted).
+- ESLint: 0 errors. Agent-browser verified role restriction + reset cycle.

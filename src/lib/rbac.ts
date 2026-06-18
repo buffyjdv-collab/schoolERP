@@ -147,6 +147,52 @@ export const SCOPE_LABELS: Record<DataScope, string> = {
   none: 'No Access',
 }
 
+// ============ ROLE-LEVEL DB OVERRIDES (Super Admin role management) ============
+// Super Admin can customize the base permission matrix for an entire role via DB.
+// These overrides apply to ALL users with that role (unless individually overridden).
+// The cache is populated server-side at request time via loadRoleOverrides().
+
+export interface RoleOverride {
+  actions?: Action[] | null
+  dataScope?: DataScope | null
+  enabled?: boolean | null
+}
+
+export type RoleOverrides = Partial<Record<ModuleId, RoleOverride>>
+
+// In-memory cache of role overrides (keyed by role). Refreshed per request on server.
+let roleOverridesCache: Record<string, RoleOverrides> | null = null
+
+/** Set the role overrides cache (called server-side at request start). */
+export function setRoleOverridesCache(overrides: Record<string, RoleOverrides>) {
+  roleOverridesCache = overrides
+}
+
+/** Clear the cache. */
+export function clearRoleOverridesCache() {
+  roleOverridesCache = null
+}
+
+/** Get effective role-level actions for a module (DB override > static PERMISSIONS). */
+export function roleEffectiveActions(role: Role, module: ModuleId): Action[] {
+  if (role === 'super_admin') return PERMISSIONS.super_admin[module] ?? []
+  const dbOv = roleOverridesCache?.[role]?.[module]
+  if (dbOv?.enabled === false) return []
+  if (dbOv?.actions !== undefined && dbOv?.actions !== null) return dbOv.actions
+  return PERMISSIONS[role]?.[module] ?? []
+}
+
+/** Get effective role-level data scope for a module. */
+export function roleEffectiveDataScope(role: Role, module: ModuleId): DataScope {
+  if (role === 'super_admin' || role === 'admin') return 'all'
+  const dbOv = roleOverridesCache?.[role]?.[module]
+  if (dbOv?.dataScope) return dbOv.dataScope
+  if (role === 'student') return 'own'
+  if (role === 'parent') return 'children'
+  if (role === 'teacher') return 'assigned_classes'
+  return 'none'
+}
+
 /** Per-module override for a specific user. null fields = inherit role default. */
 export interface ModuleOverride {
   actions?: Action[] | null      // null = inherit role; [] = no actions; [...] = custom set
@@ -173,17 +219,17 @@ export function isStaff(role: Role): boolean {
   return role === 'super_admin' || role === 'admin' || role === 'teacher'
 }
 
-/** Effective actions for a user on a module (role default + overrides). */
+/** Effective actions for a user on a module (user override > role DB override > static PERMISSIONS). */
 export function effectiveActions(user: AuthUser, module: ModuleId): Action[] {
   // Super admin always full access (can't be restricted)
   if (user.role === 'super_admin') return PERMISSIONS.super_admin[module] ?? []
   const ov = user.overrides?.[module]
-  // Force-disable
+  // User-level force-disable
   if (ov?.enabled === false) return []
-  // Custom actions override
+  // User-level custom actions override
   if (ov?.actions !== undefined && ov.actions !== null) return ov.actions
-  // Inherit role default
-  return PERMISSIONS[user.role]?.[module] ?? []
+  // Fall back to role-level DB override (or static PERMISSIONS)
+  return roleEffectiveActions(user.role, module)
 }
 
 /** Check if a USER (with overrides) can perform an action on a module. */
@@ -196,15 +242,12 @@ export function accessibleModulesForUser(user: AuthUser): ModuleId[] {
   return ALL_MODULES.filter((m) => canUser(user, m, 'view'))
 }
 
-/** Effective data scope for a user on a module (override or role default). */
+/** Effective data scope for a user on a module (user override > role DB override > static). */
 export function effectiveDataScope(user: AuthUser, module: ModuleId): DataScope {
   if (user.role === 'super_admin' || user.role === 'admin') return 'all'
   const ov = user.overrides?.[module]
   if (ov?.dataScope) return ov.dataScope
-  if (user.role === 'student') return 'own'
-  if (user.role === 'parent') return 'children'
-  if (user.role === 'teacher') return 'assigned_classes'
-  return 'none'
+  return roleEffectiveDataScope(user.role, module)
 }
 
 /** Student IDs a user is allowed to see. Returns 'all' for admin/super_admin. */

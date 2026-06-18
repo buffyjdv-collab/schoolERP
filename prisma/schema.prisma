@@ -477,6 +477,24 @@ model UserPermission {
   @@unique([userId, module])
 }
 
+// Per-role permission defaults — Super Admin can customize the base permissions for an entire role
+// (applies to ALL users with that role, unless individually overridden via UserPermission)
+model RolePermission {
+  id        String   @id @default(cuid())
+  role      String   // Role (admin, teacher, student, parent, transport_manager)
+  module    String   // ModuleId (dashboard, students, fees, ...)
+  // Custom actions JSON array (e.g. '["view","create","edit"]'). null = use static code default.
+  actions   String?
+  // Data scope: 'all' | 'own' | 'children' | 'assigned_classes' | 'none'. null = use static code default.
+  dataScope String?
+  // Force-enable (true) or force-disable (false) the module for this role. null = use static code default.
+  enabled   Boolean?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([role, module])
+}
+
 model TeacherClass {
   id      String @id @default(cuid())
   userId  String

@@ -153,5 +153,9 @@ export const api = {
     resetUserPermissions: (id: string) => jfetch<any>(`/api/admin/users/${id}/permissions`, { method: 'DELETE' }),
     setUserRole: (id: string, role: string) => jfetch<any>(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
     toggleUserActive: (id: string, active: boolean) => jfetch<any>(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify({ active }) }),
+    roles: () => jfetch<{ roles: any[]; superAdminLocked: boolean }>('/api/admin/roles'),
+    getRolePermissions: (role: string) => jfetch<any>(`/api/admin/roles/${role}`),
+    saveRolePermissions: (role: string, overrides: any) => jfetch<any>(`/api/admin/roles/${role}`, { method: 'PUT', body: JSON.stringify({ overrides }) }),
+    resetRolePermissions: (role: string) => jfetch<any>(`/api/admin/roles/${role}`, { method: 'DELETE' }),
   },
 }

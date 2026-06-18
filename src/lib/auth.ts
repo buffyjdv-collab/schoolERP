@@ -3,8 +3,8 @@ import { cookies } from 'next/headers'
 import { createHmac } from 'crypto'
 import { NextResponse } from 'next/server'
 import { db } from './db'
-import { canUser } from './rbac'
-import type { AuthUser, Role, ModuleId, Action, UserOverrides, ModuleOverride, DataScope } from './rbac'
+import { canUser, setRoleOverridesCache } from './rbac'
+import type { AuthUser, Role, ModuleId, Action, UserOverrides, ModuleOverride, DataScope, RoleOverrides, RoleOverride } from './rbac'
 
 const SECRET = process.env.AUTH_SECRET || 'vidyamatrix-dev-secret-9f3k2j'
 const COOKIE_NAME = 'erp_session'
@@ -53,8 +53,42 @@ function parseOverrides(perms: any[]): UserOverrides {
   return out
 }
 
+/** Load ALL role-level overrides from DB into the in-memory cache. Called once per request. */
+let roleOverridesLoaded = false
+async function loadRoleOverridesOnce() {
+  if (roleOverridesLoaded) return
+  try {
+    const rows = await db.rolePermission.findMany()
+    const cache: Record<string, RoleOverrides> = {}
+    for (const r of rows) {
+      if (!cache[r.role]) cache[r.role] = {}
+      const mod = r.module as ModuleId
+      const ov: RoleOverride = {}
+      if (r.actions !== null) {
+        try { ov.actions = JSON.parse(r.actions) } catch { ov.actions = null }
+      }
+      if (r.dataScope !== null) ov.dataScope = r.dataScope as DataScope
+      if (r.enabled !== null) ov.enabled = r.enabled
+      cache[r.role][mod] = ov
+    }
+    setRoleOverridesCache(cache)
+    roleOverridesLoaded = true
+  } catch {
+    // DB may not be ready; ignore
+  }
+}
+
+/** Reset the role overrides cache (called when super admin saves role changes). */
+export function resetRoleOverridesCache() {
+  roleOverridesLoaded = false
+  setRoleOverridesCache({})
+}
+
 /** Read the current user from the session cookie. Returns null if not authenticated. */
 export async function getCurrentUser(): Promise<AuthUser | null> {
+  // Load role overrides once per request (affects canUser/requirePerm)
+  await loadRoleOverridesOnce()
+
   const store = await cookies()
   const token = store.get(COOKIE_NAME)?.value
   if (!token) return null
