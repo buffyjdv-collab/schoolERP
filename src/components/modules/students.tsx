@@ -45,6 +45,7 @@ function initials(name: string) {
 export function StudentsModule() {
   const { searchQuery, user } = useStore()
   const canCreate = useCan()('students', 'create')
+  const canEdit = useCan()('students', 'edit')
   const [localSearch, setLocalSearch] = useState('')
   const [classFilter, setClassFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -57,6 +58,19 @@ export function StudentsModule() {
   const isStudent = role === 'student'
   const isParent = role === 'parent'
   const isRestricted = isStudent || isParent  // no search/filters/institution-stats
+
+  // Routes for the inline transport-assign column (staff only)
+  const { data: routes } = useQuery({ queryKey: ['routes'], queryFn: api.transport.routes, enabled: !isRestricted && canEdit })
+
+  // Inline route assignment mutation (for the table column)
+  const assignRouteTableMut = useMutation({
+    mutationFn: ({ sid, rid }: { sid: string; rid: string | null }) => api.transport.assignStudent(sid, rid),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['students'] })
+      toast.success(vars.rid ? 'Transport route assigned' : 'Transport unassigned', { description: 'Student record updated.' })
+    },
+    onError: () => toast.error('Failed to assign route'),
+  })
 
   const { data: classes } = useQuery({ queryKey: ['classes'], queryFn: api.academics.classes })
   const { data: students, isLoading } = useQuery({
@@ -192,14 +206,15 @@ export function StudentsModule() {
                   {!isRestricted && <TableHead className="hidden lg:table-cell">Parent</TableHead>}
                   <TableHead className="hidden xl:table-cell">Attendance</TableHead>
                   <TableHead>Fee</TableHead>
+                  {!isRestricted && canEdit && <TableHead className="hidden xl:table-cell">Transport</TableHead>}
                   <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? Array.from({ length: isRestricted ? 2 : 8 }).map((_, i) => (
-                  <TableRow key={i}><TableCell colSpan={isRestricted ? 5 : 7}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
+                  <TableRow key={i}><TableCell colSpan={isRestricted ? 5 : (canEdit ? 8 : 7)}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
                 )) : students?.length === 0 ? (
-                  <TableRow><TableCell colSpan={isRestricted ? 5 : 7} className="text-center py-12"><EmptyState icon={Users} title={isRestricted ? 'No records available' : 'No students found'} description={isRestricted ? 'Your linked records will appear here.' : 'Try adjusting filters or add a new student.'} /></TableCell></TableRow>
+                  <TableRow><TableCell colSpan={isRestricted ? 5 : (canEdit ? 8 : 7)} className="text-center py-12"><EmptyState icon={Users} title={isRestricted ? 'No records available' : 'No students found'} description={isRestricted ? 'Your linked records will appear here.' : 'Try adjusting filters or add a new student.'} /></TableCell></TableRow>
                 ) : students?.map(s => (
                   <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openProfile(s.id)}>
                     <TableCell>
@@ -226,6 +241,23 @@ export function StudentsModule() {
                       </div>
                     </TableCell>
                     <TableCell><StatusBadge status={s.feeStatus === 'Due' ? 'Overdue' : s.feeStatus === 'Partial' ? 'Partial' : 'Paid'} /></TableCell>
+                    {!isRestricted && canEdit && (
+                      <TableCell className="hidden xl:table-cell" onClick={(e) => e.stopPropagation()}>
+                        <Select
+                          value={(s as any).routeId || 'none'}
+                          onValueChange={(v) => assignRouteTableMut.mutate({ sid: s.id, rid: v === 'none' ? null : v })}
+                        >
+                          <SelectTrigger className="h-7 text-[11px] w-40">
+                            <Bus className="size-3 mr-1 shrink-0 text-muted-foreground" />
+                            <SelectValue placeholder="Assign…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">— No transport —</SelectItem>
+                            {routes?.map((r: any) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                    )}
                     <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openProfile(s.id) }}>View</Button></TableCell>
                   </TableRow>
                 ))}

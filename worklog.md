@@ -601,3 +601,30 @@ Stage Summary:
 - Parent role: sees ONLY children's profiles, child filter, no search/filters, no edit buttons.
 - Backend already enforces scoping (403 on unauthorized access). UI now matches.
 - ESLint: 0 errors. Agent-browser verified all 3 roles (admin assign, student own-only, parent children-only).
+
+---
+Task ID: SA-1..6
+Agent: main
+Task: Admin assigns bus/route to student in Student module + restrict student/parent to own data only
+
+Work Log:
+- Added Transport column to student table (admin/transport_manager only) with inline route-assign Select dropdown per row — calls api.transport.assignStudent(sid, rid). Stops row-click propagation so the dropdown doesn't trigger the profile drawer.
+- Added canEdit + routes query + assignRouteTableMut to main StudentsModule (was only in drawer before).
+- Updated colSpan for loading/empty states to account for the new Transport column (8 for staff with edit, 7 for staff without, 5 for restricted).
+- Verified profile drawer already had full route assignment (Change/Assign Route button + Select + bus display) — works for admin/transport_manager, hidden for student/parent.
+- Audited all student-facing API endpoints for data isolation:
+  - /api/students (GET): student sees own id only, parent sees children ids only, teacher sees assigned classIds only, admin/all. VERIFIED: student=1 record, parent=2 records.
+  - /api/students/[id] (GET + canAccessStudent): student=own only, parent=children only, teacher=assigned classes only. VERIFIED: student gets 403 on another student's profile.
+  - /api/students/[id]/attendance, /fees, /marks: all use canAccessStudent guard. VERIFIED.
+  - /api/dashboard/me: scoped to visibleStudentIds. VERIFIED.
+  - /api/fees/summary, /api/fees/invoices: role-scoped. VERIFIED.
+  - /api/attendance/summary, /api/exams/marks: role-scoped. VERIFIED.
+- UI restrictions verified in browser:
+  - Student: "My Profile" header, "My Name" column, no Parent column, no Transport column, no Add Student, no edit/delete buttons, drawer shows own route read-only (no Change button).
+  - Parent: "My Children" header, child selector, no Parent column, no Transport column, no Add Student, drawer shows children's routes read-only.
+  - Admin/transport_manager: full table with Transport column (inline assign), Add Student, Edit/Delete in drawer, Change/Assign Route in drawer.
+
+Stage Summary:
+- Admin (and transport_manager) can assign bus/route to students in TWO places: (1) inline Transport column in the student table, (2) Transport & Medical section in the profile drawer. Both show the assigned route + bus number.
+- Students see ONLY their own record; parents see ONLY their children's records. All other students' data is hidden everywhere (table, profile drawer, search results, stats). Backend enforces this via role-scoped queries + ownership checks; frontend hides columns/buttons via isRestricted + canEdit guards.
+- ESLint: 0 errors. Agent-browser verified admin inline-assign + student/parent restrictions.
