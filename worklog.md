@@ -582,3 +582,22 @@ Stage Summary:
 - Transport Manager role fully implemented with all requested capabilities: add bus, add route, assign bus to route, add stops, create new route + assign bus, assign driver to bus, add new driver, assign bus/route to student.
 - Both admin AND transport_manager can perform all transport CRUD. Other roles (teacher/student/parent) view-only or denied.
 - ESLint: 0 errors. Dev server + transport tracker healthy. Agent-browser verified.
+
+---
+Task ID: STUD-1..5
+Agent: main
+Task: Admin assigns bus/route to student in student module + restrict student/parent modules to own data only
+
+Work Log:
+- Added transport route assignment to StudentProfileDrawer: interactive "Assign Route" / "Change" button (guarded by canEdit) with a Select dropdown of all routes; calls api.transport.assignStudent(studentId, routeId). Shows route name + bus number badge when assigned. For view-only roles (student/parent), shows route name from student.transportRouteId without edit buttons.
+- Added routeId field to Student type + verified student detail API returns it.
+- Restricted StudentsModule for student role: replaced institution-wide stat cards with personal stats (My Attendance, My Avg Score, Fees Paid, Fee Due from /api/dashboard/me); added "My Profile" banner; hid search bar, class/status filters, export, Add Student; auto-opens own profile drawer; table shows "My Name" header and hides Parent column.
+- Restricted StudentsModule for parent role: replaced stats with My Children count, Using Transport, Total Fees Due, Avg Attendance (scoped to children); added "My Children" banner; added child filter buttons (All + each child by name); hid search/filters/export/Add Student; hides Parent column.
+- Verified data isolation: student sees only own record (1 row, auto-opens profile, route visible without edit buttons); parent sees only 2 children (with child filter); parent denied 403 on unrelated students' detail/fees/attendance APIs; admin sees all students with full CRUD + route assignment.
+
+Stage Summary:
+- Admin & transport_manager can assign bus/route to any student directly in the Students module profile drawer (no need to go to Transport module).
+- Student role: sees ONLY own profile, personal stats, no search/filters, no edit buttons, auto-opens own drawer.
+- Parent role: sees ONLY children's profiles, child filter, no search/filters, no edit buttons.
+- Backend already enforces scoping (403 on unauthorized access). UI now matches.
+- ESLint: 0 errors. Agent-browser verified all 3 roles (admin assign, student own-only, parent children-only).

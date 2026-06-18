@@ -6,8 +6,8 @@ import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/e
 import type { Student, FeeInvoice, ExamMark, AttendanceRecord, ClassInfo } from '@/lib/types'
 import {
   Users, UserPlus, Search, Download, Filter, GraduationCap, Phone, Mail, MapPin,
-  Calendar, Droplet, Heart, Briefcase, Bus, X, Shield, Award, TrendingUp, IdCard,
-  Pencil, Trash2,
+  Calendar, Droplet, Heart, Briefcase, Bus, X, Shield, Award, TrendingUp, TrendingDown, IdCard,
+  Pencil, Trash2, Route as RouteIcon, Navigation, UserCheck, Wallet,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -43,7 +43,7 @@ function initials(name: string) {
 }
 
 export function StudentsModule() {
-  const { searchQuery } = useStore()
+  const { searchQuery, user } = useStore()
   const canCreate = useCan()('students', 'create')
   const [localSearch, setLocalSearch] = useState('')
   const [classFilter, setClassFilter] = useState<string>('all')
@@ -53,18 +53,23 @@ export function StudentsModule() {
 
   const qc = useQueryClient()
   const q = localSearch || searchQuery
+  const role = user?.role
+  const isStudent = role === 'student'
+  const isParent = role === 'parent'
+  const isRestricted = isStudent || isParent  // no search/filters/institution-stats
 
   const { data: classes } = useQuery({ queryKey: ['classes'], queryFn: api.academics.classes })
   const { data: students, isLoading } = useQuery({
-    queryKey: ['students', q, classFilter, statusFilter],
+    queryKey: ['students', q, classFilter, statusFilter, user?.id],
     queryFn: () => api.students.list({
-      ...(q ? { q } : {}),
-      ...(classFilter !== 'all' ? { classId: classFilter } : {}),
-      ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+      ...(q && !isRestricted ? { q } : {}),
+      ...(classFilter !== 'all' && !isRestricted ? { classId: classFilter } : {}),
+      ...(statusFilter !== 'all' && !isRestricted ? { status: statusFilter } : {}),
     }),
   })
 
-  const { data: stats } = useQuery({ queryKey: ['stats'], queryFn: api.dashboard.stats })
+  const { data: stats } = useQuery({ queryKey: ['stats'], queryFn: api.dashboard.stats, enabled: !isRestricted })
+  const { data: meData } = useQuery({ queryKey: ['me', user?.id], queryFn: api.dashboard.me, enabled: isRestricted })
 
   const createMut = useMutation({
     mutationFn: (data: any) => api.students.create(data),
@@ -74,64 +79,127 @@ export function StudentsModule() {
 
   const openProfile = (id: string) => setSelectedId(id)
 
+  // Student role: auto-open own profile (only 1 record)
+  if (isStudent && students && students.length === 1 && !selectedId) {
+    setTimeout(() => setSelectedId(students[0].id), 0)
+  }
+
+  const myChildren = (meData as any)?.students || []
+
   return (
     <div className="space-y-5">
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total Students" value={stats?.totalStudents ?? '—'} sub="Active" icon={Users} accent="primary" loading={!stats} />
-        <StatCard label="Boys" value={(stats?.totalStudents ?? 0) - Math.round((stats?.totalStudents ?? 0) * 0.48)} sub="≈52%" icon={GraduationCap} accent="sky" />
-        <StatCard label="Girls" value={Math.round((stats?.totalStudents ?? 0) * 0.48)} sub="≈48%" icon={GraduationCap} accent="rose" />
-        <StatCard label="New This Year" value={stats?.newAdmissions ?? '—'} sub="Admissions 2026-27" icon={UserPlus} accent="emerald" />
-      </div>
+      {/* Stat cards — institution-wide for staff, personal for student/parent */}
+      {isRestricted ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {isStudent && (() => { const m = myChildren[0]; return m ? (
+            <>
+              <StatCard label="My Attendance" value={`${m.attendancePercent}%`} sub="Last 30 days" icon={UserCheck} accent="emerald" />
+              <StatCard label="My Avg Score" value={`${m.avgPct}%`} sub="Recent exams" icon={Award} accent="violet" />
+              <StatCard label="Fees Paid" value={fmtINR(m.paidFees)} sub={`of ${fmtINR(m.totalFees)}`} icon={Wallet} accent="primary" />
+              <StatCard label="Fee Due" value={fmtINR(m.dueFees)} sub={m.feeStatus === 'Clear' ? 'All clear' : 'Pending'} icon={TrendingDown} accent={m.dueFees > 0 ? 'rose' : 'emerald'} />
+            </>
+          ) : null })()}
+          {isParent && (
+            <>
+              <StatCard label="My Children" value={myChildren.length} sub="Linked to your account" icon={Users} accent="primary" />
+              <StatCard label="Using Transport" value={myChildren.filter((c: any) => c.transportRoute).length} sub="Of your children" icon={Bus} accent="emerald" />
+              <StatCard label="Total Fees Due" value={fmtINR(myChildren.reduce((s: number, c: any) => s + (c.dueFees || 0), 0))} sub="Across all children" icon={Wallet} accent="amber" />
+              <StatCard label="Avg Attendance" value={`${myChildren.length ? Math.round(myChildren.reduce((s: number, c: any) => s + (c.attendancePercent || 0), 0) / myChildren.length) : 0}%`} sub="All children" icon={UserCheck} accent="violet" />
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Total Students" value={stats?.totalStudents ?? '—'} sub="Active" icon={Users} accent="primary" loading={!stats} />
+          <StatCard label="Boys" value={(stats?.totalStudents ?? 0) - Math.round((stats?.totalStudents ?? 0) * 0.48)} sub="≈52%" icon={GraduationCap} accent="sky" />
+          <StatCard label="Girls" value={Math.round((stats?.totalStudents ?? 0) * 0.48)} sub="≈48%" icon={GraduationCap} accent="rose" />
+          <StatCard label="New This Year" value={stats?.newAdmissions ?? '—'} sub="Admissions 2026-27" icon={UserPlus} accent="emerald" />
+        </div>
+      )}
+
+      {/* Personal banner for restricted roles */}
+      {isRestricted && (
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-emerald-600 text-primary-foreground p-5">
+          <div className="absolute inset-0 bg-grid opacity-20" />
+          <div className="relative flex items-center gap-3">
+            {isStudent ? <UserCheck className="size-6" /> : <Users className="size-6" />}
+            <div>
+              <h2 className="text-lg font-bold">{isStudent ? 'My Profile' : 'My Children'}</h2>
+              <p className="text-sm opacity-90">
+                {isStudent
+                  ? 'View and manage your academic, attendance, fee and transport information.'
+                  : `You have access to ${myChildren.length} ${myChildren.length === 1 ? 'child' : 'children'}'s records. Other students' data is restricted.`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toolbar + table */}
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row gap-3 mb-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input placeholder="Search by name, admission no, parent phone…" value={q} onChange={(e) => setLocalSearch(e.target.value)} className="pl-9 h-10" />
+          {/* Toolbar — only for staff (student/parent can't search/filter/export) */}
+          {!isRestricted && (
+            <div className="flex flex-col sm:flex-row gap-3 mb-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input placeholder="Search by name, admission no, parent phone…" value={q} onChange={(e) => setLocalSearch(e.target.value)} className="pl-9 h-10" />
+              </div>
+              <Select value={classFilter} onValueChange={setClassFilter}>
+                <SelectTrigger className="w-full sm:w-44 h-10"><Filter className="size-3.5 mr-1.5" /><SelectValue placeholder="Class" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Classes</SelectItem>
+                  {classes?.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-full sm:w-36 h-10"><SelectValue placeholder="Status" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="Active">Active</SelectItem>
+                  <SelectItem value="Alumni">Alumni</SelectItem>
+                  <SelectItem value="Inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={() => toast.info('Export started — CSV will download shortly')}>
+                <Download className="size-4" />
+              </Button>
+              {canCreate && <AddStudentDialog open={addOpen} onOpenChange={setAddOpen} classes={classes || []} onCreate={(d) => createMut.mutate(d)} loading={createMut.isPending} />}
             </div>
-            <Select value={classFilter} onValueChange={setClassFilter}>
-              <SelectTrigger className="w-full sm:w-44 h-10"><Filter className="size-3.5 mr-1.5" /><SelectValue placeholder="Class" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Classes</SelectItem>
-                {classes?.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-36 h-10"><SelectValue placeholder="Status" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="Active">Active</SelectItem>
-                <SelectItem value="Alumni">Alumni</SelectItem>
-                <SelectItem value="Inactive">Inactive</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={() => toast.info('Export started — CSV will download shortly')}>
-              <Download className="size-4" />
-            </Button>
-            {canCreate && <AddStudentDialog open={addOpen} onOpenChange={setAddOpen} classes={classes || []} onCreate={(d) => createMut.mutate(d)} loading={createMut.isPending} />}
-          </div>
+          )}
+
+          {/* For parent with multiple children, show a child filter */}
+          {isParent && myChildren.length > 1 && (
+            <div className="flex items-center gap-2 mb-4 p-3 rounded-lg bg-muted/50">
+              <Users className="size-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Filter by child:</span>
+              <div className="flex gap-1.5 flex-wrap">
+                <button onClick={() => setLocalSearch('')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${!q ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>All</button>
+                {myChildren.map((c: any) => (
+                  <button key={c.id} onClick={() => setLocalSearch(c.name)} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${q === c.name ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>{c.name}</button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="rounded-lg border max-h-[60vh] overflow-y-auto scroll-thin">
             <Table>
               <TableHeader className="sticky top-0 bg-card z-10">
                 <TableRow>
-                  <TableHead>Student</TableHead>
+                  <TableHead>{isStudent ? 'My Name' : 'Student'}</TableHead>
                   <TableHead className="hidden md:table-cell">Admission No</TableHead>
                   <TableHead className="hidden sm:table-cell">Class</TableHead>
-                  <TableHead className="hidden lg:table-cell">Parent</TableHead>
+                  {!isRestricted && <TableHead className="hidden lg:table-cell">Parent</TableHead>}
                   <TableHead className="hidden xl:table-cell">Attendance</TableHead>
                   <TableHead>Fee</TableHead>
                   <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? Array.from({ length: 8 }).map((_, i) => (
-                  <TableRow key={i}><TableCell colSpan={7}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
+                {isLoading ? Array.from({ length: isRestricted ? 2 : 8 }).map((_, i) => (
+                  <TableRow key={i}><TableCell colSpan={isRestricted ? 5 : 7}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
                 )) : students?.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="text-center py-12"><EmptyState icon={Users} title="No students found" description="Try adjusting filters or add a new student." /></TableCell></TableRow>
+                  <TableRow><TableCell colSpan={isRestricted ? 5 : 7} className="text-center py-12"><EmptyState icon={Users} title={isRestricted ? 'No records available' : 'No students found'} description={isRestricted ? 'Your linked records will appear here.' : 'Try adjusting filters or add a new student.'} /></TableCell></TableRow>
                 ) : students?.map(s => (
                   <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openProfile(s.id)}>
                     <TableCell>
@@ -145,10 +213,10 @@ export function StudentsModule() {
                     </TableCell>
                     <TableCell className="hidden md:table-cell font-mono text-xs">{s.admissionNo}</TableCell>
                     <TableCell className="hidden sm:table-cell"><Badge variant="outline">{s.className}</Badge></TableCell>
-                    <TableCell className="hidden lg:table-cell text-xs">
+                    {!isRestricted && <TableCell className="hidden lg:table-cell text-xs">
                       <div className="truncate">{s.fatherName || '-'}</div>
                       <div className="text-muted-foreground">{s.parentPhone}</div>
-                    </TableCell>
+                    </TableCell>}
                     <TableCell className="hidden xl:table-cell">
                       <div className="flex items-center gap-2">
                         <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -165,8 +233,8 @@ export function StudentsModule() {
             </Table>
           </div>
           <div className="mt-3 text-xs text-muted-foreground flex items-center justify-between">
-            <span>Showing {students?.length ?? 0} students</span>
-            <span>Click any row to view full profile</span>
+            <span>{isStudent ? 'Your record' : isParent ? `${students?.length ?? 0} ${students?.length === 1 ? 'child' : 'children'}` : `Showing ${students?.length ?? 0} students`}</span>
+            <span>{isRestricted ? 'Click to view full details' : 'Click any row to view full profile'}</span>
           </div>
         </CardContent>
       </Card>
@@ -174,6 +242,13 @@ export function StudentsModule() {
       {selectedId && <StudentProfileDrawer studentId={selectedId} onClose={() => setSelectedId(null)} />}
     </div>
   )
+}
+
+function fmtINR(n: number) {
+  if (!n) return '₹0'
+  if (n >= 100000) return `₹${(n / 100000).toFixed(2)} L`
+  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}K`
+  return `₹${n.toLocaleString('en-IN')}`
 }
 
 function AddStudentDialog({ open, onOpenChange, classes, onCreate, loading }: {
@@ -228,8 +303,10 @@ function StudentProfileDrawer({ studentId, onClose }: { studentId: string; onClo
   const canDelete = useCan()('students', 'delete')
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [assigningRoute, setAssigningRoute] = useState(false)
 
   const { data: classes } = useQuery({ queryKey: ['classes'], queryFn: api.academics.classes })
+  const { data: routes } = useQuery({ queryKey: ['routes'], queryFn: api.transport.routes, enabled: canEdit })
   const { data: student, isLoading } = useQuery({ queryKey: ['student', studentId], queryFn: () => api.students.get(studentId) })
   const { data: fees } = useQuery({ queryKey: ['student-fees', studentId], queryFn: () => api.students.fees(studentId) })
   const { data: marks } = useQuery({ queryKey: ['student-marks', studentId], queryFn: () => api.students.marks(studentId) })
@@ -257,6 +334,23 @@ function StudentProfileDrawer({ studentId, onClose }: { studentId: string; onClo
     },
     onError: (e: any) => toast.error('Failed to delete: ' + e.message),
   })
+
+  // Assign transport route to this student
+  const assignRouteMut = useMutation({
+    mutationFn: ({ sid, rid }: { sid: string; rid: string | null }) => api.transport.assignStudent(sid, rid),
+    onSuccess: (_d, vars) => {
+      toast.success(vars.rid ? 'Transport route assigned' : 'Transport route unassigned')
+      qc.invalidateQueries({ queryKey: ['student', studentId] })
+      qc.invalidateQueries({ queryKey: ['students'] })
+      setAssigningRoute(false)
+    },
+    onError: (e: any) => toast.error('Failed to assign route: ' + e.message),
+  })
+
+  // Find the route object matching the student's current routeId
+  // For view-only roles (student/parent), routes may not be fetched — use transportRouteId string as fallback
+  const currentRoute = routes?.find((r: any) => r.id === student?.routeId || r.name === student?.transportRouteId)
+  const routeDisplayName = currentRoute?.name || student?.transportRouteId || null
 
   const radarData = (marks || []).slice(0, 8).map(m => ({ subject: m.subject.slice(0, 4), marks: Math.round(((m.obtained || 0) / m.maxMarks) * 100) }))
 
@@ -309,16 +403,55 @@ function StudentProfileDrawer({ studentId, onClose }: { studentId: string; onClo
               </CardContent></Card>
             </div>
 
-            {/* Transport + medical */}
+            {/* Transport assignment + medical */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Card><CardContent className="p-4">
                 <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Bus className="size-4 text-primary" /> Transport & Medical</h3>
                 <dl className="space-y-2 text-sm">
-                  <Info icon={Bus} label="Route" value={student?.transportRouteId || 'Not opted'} />
-                  <Info icon={Heart} label="Medical Info" value={student?.medicalInfo || 'No known conditions'} />
                   <Info icon={Calendar} label="Admission Date" value={student ? new Date(student.admissionDate).toLocaleDateString('en-IN') : ''} />
                   <Info icon={GraduationCap} label="Previous School" value={student?.previousSchool || '—'} />
+                  <Info icon={Heart} label="Medical Info" value={student?.medicalInfo || 'No known conditions'} />
                 </dl>
+                {/* Transport route assignment — interactive for admin/transport_manager */}
+                <div className="mt-3 pt-3 border-t">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] text-muted-foreground flex items-center gap-1.5"><RouteIcon className="size-3" /> Transport Route</span>
+                    {canEdit && !assigningRoute && routeDisplayName && (
+                      <button onClick={() => setAssigningRoute(true)} className="text-[11px] text-primary hover:underline">Change</button>
+                    )}
+                    {canEdit && !assigningRoute && !routeDisplayName && (
+                      <button onClick={() => setAssigningRoute(true)} className="text-[11px] text-primary hover:underline">Assign Route</button>
+                    )}
+                  </div>
+                  {canEdit && assigningRoute ? (
+                    <div className="space-y-2">
+                      <Select
+                        value={currentRoute?.id || ''}
+                        onValueChange={(v) => { assignRouteMut.mutate({ sid: studentId, rid: v === 'none' ? null : v }) }}
+                      >
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select route…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">— No transport —</SelectItem>
+                          {routes?.map((r: any) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <button onClick={() => setAssigningRoute(false)} className="text-[11px] text-muted-foreground hover:text-foreground">Cancel</button>
+                    </div>
+                  ) : routeDisplayName ? (
+                    <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                      <Navigation className="size-3.5 text-emerald-600" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{routeDisplayName}</div>
+                        {currentRoute?.vehicles?.[0] && <div className="text-[11px] text-muted-foreground">Bus: {currentRoute.vehicles[0].vehicleNo}</div>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 p-2 rounded-lg bg-muted">
+                      <Bus className="size-3.5 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">Not using transport</span>
+                    </div>
+                  )}
+                </div>
               </CardContent></Card>
               <Card><CardContent className="p-4">
                 <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><TrendingUp className="size-4 text-primary" /> Performance Snapshot</h3>

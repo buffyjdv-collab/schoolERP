@@ -33,6 +33,7 @@ export interface Student {
   previousSchool?: string | null
   medicalInfo?: string | null
   transportRouteId?: string | null
+  routeId?: string | null
   hostelRoomId?: string | null
   status: string
   photo?: string | null
