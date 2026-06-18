@@ -128,6 +128,7 @@ model Student {
   medicalInfo      String?
   // Transport
   transportRouteId String?
+  routeId          String?
   // Hostel
   hostelRoomId     String?
   // Status
@@ -272,7 +273,34 @@ model Vehicle {
   heading     Float?
   lastUpdate  DateTime?
   status      String    @default("Idle") // Idle, Moving, Stopped, Maintenance
+  // Relations
+  routeId     String?
+  route       Route?    @relation(fields: [routeId], references: [id])
+  driver      Driver?   @relation("VehicleDriver")
   createdAt   DateTime  @default(now())
+}
+
+model Driver {
+  id           String   @id @default(cuid())
+  name         String
+  phone        String
+  licenseNo    String?
+  address      String?
+  joiningDate  DateTime @default(now())
+  status       String   @default("Active") // Active, OnLeave, Inactive
+  vehicleId    String?  @unique // assigned bus (single owning side)
+  vehicle      Vehicle? @relation("VehicleDriver", fields: [vehicleId], references: [id])
+  createdAt    DateTime @default(now())
+}
+
+model Route {
+  id          String         @id @default(cuid())
+  name        String         @unique
+  description String?
+  status      String         @default("Active") // Active, Inactive
+  stops       TransportStop[]
+  vehicles    Vehicle[]
+  createdAt   DateTime       @default(now())
 }
 
 model TransportStop {
@@ -284,6 +312,8 @@ model TransportStop {
   pickupTime String
   dropTime   String
   fare       Float    @default(0)
+  routeId    String?
+  route      Route?   @relation(fields: [routeId], references: [id])
   createdAt  DateTime @default(now())
 }
 

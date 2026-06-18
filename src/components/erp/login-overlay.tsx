@@ -3,7 +3,7 @@
 import { useStore } from '@/lib/store'
 import { ROLE_LABELS, ROLE_DESCRIPTIONS } from '@/lib/rbac'
 import type { Role } from '@/lib/rbac'
-import { School, Shield, GraduationCap, User, Users, Loader2, LogIn, Sparkles, Eye, EyeOff } from 'lucide-react'
+import { School, Shield, GraduationCap, User, Users, Bus, Loader2, LogIn, Sparkles, Eye, EyeOff } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 const ROLE_ICONS: Record<Role, any> = {
   super_admin: Shield,
   admin: School,
+  transport_manager: Bus,
   teacher: GraduationCap,
   student: User,
   parent: Users,
@@ -21,7 +22,8 @@ const ROLE_ICONS: Record<Role, any> = {
 const DEMO_ACCOUNTS: { role: Role; email: string; password: string; color: string }[] = [
   { role: 'super_admin', email: 'superadmin@vidyamatrix.edu', password: 'super123', color: 'from-violet-500 to-violet-600' },
   { role: 'admin', email: 'admin@vidyamatrix.edu', password: 'admin123', color: 'from-emerald-500 to-emerald-600' },
-  { role: 'teacher', email: 'teacher@vidyamatrix.edu', password: 'teacher123', color: 'from-teal-500 to-teal-600' },
+  { role: 'transport_manager', email: 'transport@vidyamatrix.edu', password: 'transport123', color: 'from-teal-500 to-teal-600' },
+  { role: 'teacher', email: 'teacher@vidyamatrix.edu', password: 'teacher123', color: 'from-cyan-500 to-cyan-600' },
   { role: 'student', email: 'student@vidyamatrix.edu', password: 'student123', color: 'from-amber-500 to-amber-600' },
   { role: 'parent', email: 'parent@vidyamatrix.edu', password: 'parent123', color: 'from-sky-500 to-sky-600' },
 ]

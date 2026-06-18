@@ -1,7 +1,7 @@
 // RBAC Engine — single source of truth for role-based permissions.
 // Isomorphic (used on both server and client).
 
-export type Role = 'super_admin' | 'admin' | 'teacher' | 'student' | 'parent'
+export type Role = 'super_admin' | 'admin' | 'transport_manager' | 'teacher' | 'student' | 'parent'
 
 export type ModuleId =
   | 'dashboard' | 'students' | 'admissions' | 'academics' | 'attendance'
@@ -21,6 +21,7 @@ export const ALL_MODULES: ModuleId[] = [
 export const ROLE_LABELS: Record<Role, string> = {
   super_admin: 'Super Admin',
   admin: 'Administrator',
+  transport_manager: 'Transport Manager',
   teacher: 'Teacher',
   student: 'Student',
   parent: 'Parent',
@@ -29,6 +30,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   super_admin: 'Full system access including user management',
   admin: 'Full operational access to all school modules',
+  transport_manager: 'Manage buses, routes, drivers, stops & student transport assignments',
   teacher: 'Class teacher — academic operations for assigned classes',
   student: 'Student — view own academic, attendance & fee records',
   parent: 'Parent — monitor children\'s progress, attendance & fees',
@@ -68,6 +70,12 @@ export const PERMISSIONS: Record<Role, Partial<Record<ModuleId, Action[]>>> = {
     library: A(['view','create','edit','delete','issue','return','export']),
     assets: A(['view','create','edit','delete','export']),
     communication: A(['view','send','delete','export']),
+  },
+  transport_manager: {
+    dashboard: A(['view']), 'ai-assistant': A(['view']),
+    students: A(['view','edit']),               // view all + assign routes
+    transport: A(['view','create','edit','delete','export']),  // full transport CRUD
+    communication: A(['view','send']),          // notify parents about transport
   },
   teacher: {
     dashboard: A(['view']), 'ai-assistant': A(['view']),

@@ -382,6 +382,34 @@ async function main() {
   console.log(`RBAC Users: ${await db.user.count()}`)
   console.log(`Teacher classes: ${await db.teacherClass.count()}`)
   console.log(`Parent-child links: ${await db.parentChild.count()}`)
+
+  // ============ TRANSPORT MANAGER + DRIVERS + ROUTES ============
+  // Create proper Route records (matching existing vehicle routeNames) and Drivers
+  const existingVehicles = await db.vehicle.findMany()
+  for (const v of existingVehicles) {
+    // Upsert a Route matching this vehicle's routeName
+    const route = await db.route.upsert({ where: { name: v.routeName }, create: { name: v.routeName, description: `${v.routeName} service`, status: 'Active' }, update: {} })
+    // Link vehicle to route
+    await db.vehicle.update({ where: { id: v.id }, data: { routeId: route.id } })
+    // Link existing stops to route
+    await db.transportStop.updateMany({ where: { routeName: v.routeName }, data: { routeId: route.id } })
+    // Create a driver for this vehicle (reuse driverName/driverPhone)
+    const driver = await db.driver.create({ data: { name: v.driverName, phone: v.driverPhone, licenseNo: 'KA-LIC-' + pad(randInt(10000,99999),5), status: 'Active', vehicleId: v.id } })
+    void driver
+  }
+
+  // Add a few unassigned drivers (available pool)
+  for (let i = 0; i < 3; i++) {
+    await db.driver.create({ data: { name: `${rand(firstNames)} ${rand(lastNames)}`, phone: '+91' + pad(randInt(7000000000,9999999999),10), licenseNo: 'KA-LIC-' + pad(randInt(10000,99999),5), status: 'Active' } })
+  }
+
+  // Transport Manager user
+  const tmName = 'Ravi Transport'
+  await db.user.create({ data: { email: 'transport@vidyamatrix.edu', name: tmName, passwordHash: hash('transport123'), role: 'transport_manager' } })
+
+  console.log(`Drivers: ${await db.driver.count()}`)
+  console.log(`Routes: ${await db.route.count()}`)
+  console.log(`Transport manager user created`)
   console.log('Seed complete!')
   console.log(`Students: ${await db.student.count()}`)
   console.log(`Employees: ${await db.employee.count()}`)

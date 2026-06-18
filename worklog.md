@@ -481,3 +481,104 @@ Stage Summary:
 - Complete data isolation: every API endpoint checks auth + permission + role-scoped data. Students/parents see ONLY own/children's records. Teachers see ONLY assigned classes. Admin sees all.
 - Complete admin CRUD: Create/Edit/Delete UI on ALL 14 modules, all permission-guarded, all functional.
 - ESLint: 0 errors. Dev server healthy. Agent-browser verified admin CRUD + student isolation.
+
+---
+Task ID: 6
+Agent: transport-ui-tabs
+Task: Rewrite Transport module UI with tabbed interface (Live Tracking, Drivers, Routes, Student Assignment) — add Driver/Route/Student-assignment management UI on top of existing live GPS tracking.
+
+Work Log:
+- Read worklog.md, src/lib/api.ts, src/lib/store.ts, src/lib/rbac.ts, src/lib/types.ts, src/components/erp/primitives.tsx, src/components/ui/tabs.tsx, src/components/ui/table.tsx, all 5 transport API route files (drivers, routes, drivers/[id], routes/[id], stops, stops/[id], assign-student), and the existing src/components/modules/transport.tsx (661 lines, with live GPS map + socket.io + vehicle/stop CRUD).
+- Confirmed RBAC: admin/super_admin/transport_manager have full transport CRUD; transport_manager also has students view+edit (for assignment). Teacher has transport.view only; student/parent have transport.view (their own).
+- Rewrote `src/components/modules/transport.tsx` (now 1704 lines) keeping `'use client'` first line. Structure:
+
+  **`TransportModule` (top-level):**
+  - Hoisted the socket.io connection (`io('/?XTransformPort=3003')`), `liveVehicles` state, `connected` state, and the `vehicles` useQuery (with `refetchInterval: connected ? false : 3000` polling fallback) to the top level so the live GPS keeps streaming across tab switches. Also fetched `stops` here for sharing.
+  - Renders a `Tabs` with 4 tabs (Live Tracking / Drivers / Routes / Student Assignment). Passes `vehicles`, `liveVehicles`, `connected`, `stops` down to the relevant sub-components.
+
+  **Tab 1 — `LiveTrackingTab` (existing UI, refactored to receive props):**
+  - 4 StatCards (Total Fleet, Moving Now, At Stops, GPS Status) — unchanged.
+  - Live Fleet Map card (lg:col-span-2) with the `<LiveMap>` SVG component — unchanged, still uses `project()` + BOUNDS + `VEH_COLORS`.
+  - Fleet Status list card with "Add Vehicle" button (RBAC-guarded).
+  - Selected-vehicle detail panel (6 Metric tiles + Edit/Delete buttons + Notify Pickup/Drop/Calculate ETA).
+  - Route Stops & Pickups card with Add Stop + per-stop Delete (AlertDialog).
+  - Existing `VehicleFormDialog` and `StopFormDialog` reused for create/edit + delete confirmations.
+  - Socket `connect`/`disconnect`/`vehicles:update` listeners preserved exactly.
+
+  **Tab 2 — `DriversTab` (NEW):**
+  - Stat strip: Total Drivers, Assigned (vehicleId != null), Available (free & Active), On Leave (status=OnLeave).
+  - Drivers table (`max-h-[60vh] overflow-y-auto scroll-thin`) with columns: Name (+address), Phone, License No, Status (StatusBadge), Assigned Bus, Actions.
+  - "Add Driver" button (RBAC create) → `<DriverFormDialog>` (name, phone, licenseNo, address, status-on-edit) → `api.transport.createDriver`.
+  - Per-row Edit (pencil) → `<DriverFormDialog mode="edit">` → `api.transport.updateDriver`.
+  - Per-row Delete (trash, rose) → AlertDialog (explains soft-delete: status→Inactive + unassign) → `api.transport.deleteDriver`.
+  - Per-row **Assign to Bus** Select dropdown listing all vehicles (vehicleNo · routeName) + "— Unassign —" option. Selecting calls `api.transport.assignDriver(id, vehicleId|null)`. Shows current vehicleId as the Select value. Disabled for users without `transport.edit`.
+  - All mutations invalidate `['drivers']` + `['vehicles']` (since driver assignment syncs driverName on vehicle) + `toast.success`.
+
+  **Tab 3 — `RoutesTab` (NEW):**
+  - Stat strip: Total Routes, Active (status=Active), Total Buses Assigned (sum of vehicles across routes), Total Stops (sum of stopCount).
+  - Routes list as cards (lg:grid-cols-2). Each card shows: route name + StatusBadge + description, meta strip (Stops count, Buses count), assigned buses as chips (vehicleNo + driverName), and an Actions row.
+  - "Add Route" button (RBAC create) → `<RouteFormDialog>` (name, description, optional vehicleId Select to assign a bus at creation — matches the "create new route and assign bus to that route" requirement) → `api.transport.createRoute`.
+  - Per-card Edit (RBAC edit) → `<RouteFormDialog mode="edit">` (name, description, status) → `api.transport.updateRoute`.
+  - Per-card Delete (RBAC delete) → AlertDialog (explains buses/stops/students get unlinked) → `api.transport.deleteRoute`. Invalidates routes+vehicles+stops+students.
+  - Per-card **Assign Bus to Route** Select — lists all vehicles + "— Unassign all buses —" option. Calls `api.transport.assignBusToRoute(routeId, vehicleId|null)`. Single-select add (per backend semantics: vehicleId assigns that one vehicle; null unassigns ALL).
+  - Per-card **Manage Stops** toggle button — expands an inline sub-view listing all stops filtered by `stop.routeName === route.name`. Each stop row has Edit (pencil) → `<StopFormDialog mode="edit">` and Delete (trash) → AlertDialog. "Add Stop" button inside the sub-view opens `<StopFormDialog>` with `defaultRouteName` pre-filled and the routeName field disabled, calling `api.transport.createStop`. Stop edit/delete reuse `api.transport.updateStop`/`api.transport.deleteStop`.
+
+  **Tab 4 — `StudentAssignmentTab` (NEW):**
+  - Summary strip: Search Results count, Using Transport (transportRouteId != null), Not Assigned.
+  - Search bar with debounce (350ms) + clear (X) button. Calls `api.students.list({ q })` when `q.trim().length >= 2` (uses `enabled` to gate the query).
+  - Results table (`max-h-[60vh] overflow-y-auto scroll-thin`): Student Name (+parent phone), Admission No, Class, Current Route (badge or italic "Not assigned"), Actions.
+  - Per-row "Assign Route" / "Change" button (RBAC `students.edit`) → inline Select dropdown listing all routes + "— Unassign —" → `api.transport.assignStudent(studentId, routeId|null)`. Toast on success; invalidates the search query.
+  - Falls back to "View only" text for roles without students.edit.
+
+  **Shared helpers:**
+  - `TableBodySkeletonCell` — single-cell skeleton row for loading states in tables.
+  - `Metric` — small metric tile (preserved from original).
+  - `LiveMap` — SVG live map (preserved exactly, including the 1.5s `setInterval` tick re-render for the HUD clock).
+  - `VehicleFormDialog`, `StopFormDialog` — preserved (StopFormDialog extended with optional `mode`, `defaultRouteName`, `target` props to support both create-with-default-route and edit flows).
+  - New dialogs: `DriverFormDialog` (create/edit), `RouteFormDialog` (create/edit with optional vehicleId assignment on create).
+
+- Conventions followed per spec:
+  - `'use client'` first line; imports include `useQuery/useMutation/useQueryClient`, `useCan`, `api`, `toast`, full `AlertDialog*` set, `Tabs*`, `Table*`, `Select*`, `Dialog*`, `Card*`, `Button`, `Input`, `Label`, `Badge`, `Skeleton`, `ScrollArea`, `Separator`.
+  - shadcn components exclusively from `@/components/ui/*`; icons from `lucide-react`.
+  - Emerald/teal/amber/rose/violet/cyan accents only — NO indigo/blue. (`VEH_COLORS` changed from `['#10b981','#14b8a6','#f59e0b','#f43f5e','#8b5cf6','#0ea5e9']` to swap the sky-blue `#0ea5e9` for cyan `#06b6d4`.)
+  - Responsive (mobile-first): TabsList is `w-full sm:w-auto` and horizontally scrollable on small screens; stat cards `grid-cols-2 md:grid-cols-4`; route cards `grid-cols-1 lg:grid-cols-2`; all tables wrapped in `<div className="max-h-[60vh] overflow-y-auto scroll-thin">` with sticky headers.
+  - All mutations use `useMutation` + `qc.invalidateQueries` + `toast.success`/`toast.error`.
+  - AlertDialog for every delete confirmation with a rose-600 `AlertDialogAction`.
+  - Every create/edit/delete/assign button wrapped in `useCan()('transport'|'students', action)` — admin/super_admin/transport_manager see all controls; teacher sees view-only; student/parent see view-only (no create/edit/delete/assign buttons).
+  - Live GPS preserved: socket.io connection still uses `io('/?XTransformPort=3003')` with the same transports/reconnection options; `vehicles:update` listener still calls `setLiveVehicles(data)`; `refetchInterval: connected ? false : 3000` polling fallback stays exactly as before; `<LiveMap>` SVG component unchanged (same BOUNDS, project(), grid, road paths, school marker, stop markers, vehicle markers with heading arrows + ping animation, HUD overlays).
+  - No `useEffect` setState anti-patterns introduced (the LiveMap `setInterval` tick is the existing pattern and does not trigger `react-hooks/set-state-in-effect`).
+
+Verification:
+- ESLint: `cd /home/z/my-project && timeout 90 bun node_modules/eslint/bin/eslint.js src/components/modules/transport.tsx 2>&1 | tail -20` → **0 errors, 0 warnings, exit 0**.
+- TypeScript: `bunx tsc --noEmit` reports only pre-existing config-level errors in OTHER files (TanStack query .d.ts target-version warnings, sonner esModuleInterop, etc.) — zero new errors introduced by transport.tsx.
+- Dev log: `✓ Compiled in 75ms` / `✓ Compiled in 134ms` after edits — no compile errors. Mini-service still streaming `POST /api/transport/update 200` continuously (every ~16ms), confirming the live GPS pipeline is untouched.
+
+Stage Summary:
+- Transport module now exposes 4 fully-functional tabs: (1) Live Tracking with the original live map + fleet list + vehicle detail + route stops + vehicle/stop CRUD; (2) Drivers management with stat strip, table, full CRUD, and inline bus-assignment Select; (3) Routes management with stat strip, card grid, full CRUD, inline bus-assignment Select, and expandable per-route Manage Stops sub-view with its own stop CRUD; (4) Student Assignment with debounced search, summary strip, results table, and inline route-assignment Select.
+- All actions RBAC-guarded client-side via `useCan()` (admin/super_admin/transport_manager → full CRUD; teacher → view-only; student/parent → view-only). Backend already enforces the same via `requirePerm` on every endpoint.
+- Live GPS tracking (socket.io on port 3003 + `<LiveMap>` SVG + polling fallback) preserved 1:1 from the original implementation — hoisted the socket + vehicles query to the top-level `TransportModule` so the GPS stream keeps flowing even when the user is on the Drivers/Routes/Student Assignment tabs.
+- Lint status: 0 errors, 0 warnings. Dev server compiles cleanly. No backend changes were needed (all 8 transport API routes — vehicles, drivers, routes, stops, assign-student + their [id] handlers — were already in place).
+
+
+---
+Task ID: TM-1..7
+Agent: main + subagent (task 6)
+Task: Implement Transport Manager role + driver/route/bus/stop/student-assignment management
+
+Work Log:
+- Schema: added Driver model (name, phone, licenseNo, status, vehicleId @unique → 1:1 with Vehicle), Route model (name @unique, description, status, stops[], vehicles[]), linked Vehicle↔Route (routeId), TransportStop↔Route (routeId), Student↔Route (routeId). Kept legacy string fields (routeName, driverName, driverPhone, transportRouteId) for GPS tracker backward compat.
+- RBAC: added transport_manager role — transport (full CRUD), students (view+edit for assignment), dashboard (view), communication (view+send), ai-assistant (view). Updated ROLE_LABELS/DESCRIPTIONS.
+- Seed: created 6 Route records (matching existing vehicle routeNames), linked vehicles + stops + drivers to routes; created 9 Drivers (6 assigned to buses + 3 available); created transport_manager user (transport@vidyamatrix.edu / transport123).
+- Backend API routes (all requirePerm-guarded):
+  - /api/transport/drivers (GET, POST) + [id] (PATCH edit, PUT assign-to-bus, DELETE)
+  - /api/transport/routes (GET, POST create-with-optional-bus) + [id] (PATCH edit, PUT assign-bus-to-route, DELETE with cascade-unlink)
+  - /api/transport/assign-student (POST — assigns/unassigns route to student)
+- Updated login overlay (6 demo accounts incl Transport Manager), topbar (role icon Bus + teal badge + switch-user dropdown), api.ts (drivers/routes/assignDriver/assignBusToRoute/assignStudent helpers).
+- Subagent rewrote Transport module UI with 4 tabs: Live Tracking (preserved GPS), Drivers (CRUD + assign-to-bus), Routes (CRUD + assign-bus + manage stops), Student Assignment (search + assign route).
+- Verified: transport_manager login → correct sidebar (Dashboard/Students/Transport/Communication/AI) → Drivers tab (created Suresh Kumar) → Routes tab (created Route 7 - Whitefield + assigned bus) → Student Assignment (assigned Route 7 to Vivaan Sharma, reflected in UI) → denied HR/Fees (403). Admin also has full transport CRUD (confirmed via API + UI).
+- Live GPS tracker still streaming (POST /api/transport/update 200 every 1.5s); all 6 buses moving on map.
+
+Stage Summary:
+- Transport Manager role fully implemented with all requested capabilities: add bus, add route, assign bus to route, add stops, create new route + assign bus, assign driver to bus, add new driver, assign bus/route to student.
+- Both admin AND transport_manager can perform all transport CRUD. Other roles (teacher/student/parent) view-only or denied.
+- ESLint: 0 errors. Dev server + transport tracker healthy. Agent-browser verified.

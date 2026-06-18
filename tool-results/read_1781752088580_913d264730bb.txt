@@ -1,0 +1,661 @@
+     1→     1→     1→'use client'
+     2→     2→     2→
+     3→     3→     3→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     4→     4→     4→import { api } from '@/lib/api'
+     5→     5→     5→import { useCan } from '@/lib/store'
+     6→     6→     6→import { StatCard, SectionHeader, StatusBadge } from '@/components/erp/primitives'
+     7→     7→     7→import type { Vehicle } from '@/lib/types'
+     8→     8→     8→import {
+     9→     9→     9→  Bus, Users, Gauge, MapPin, Navigation, Radio, Fuel, Activity, Phone, Square, Circle, Triangle,
+    10→    10→    10→  Plus, Pencil, Trash2,
+    11→    11→    11→} from 'lucide-react'
+    12→    12→    12→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+    13→    13→    13→import { Button } from '@/components/ui/button'
+    14→    14→    14→import { Input } from '@/components/ui/input'
+    15→    15→    15→import { Label } from '@/components/ui/label'
+    16→    16→    16→import { Badge } from '@/components/ui/badge'
+    17→    17→    17→import { Skeleton } from '@/components/ui/skeleton'
+    18→    18→    18→import { ScrollArea } from '@/components/ui/scroll-area'
+    19→    19→    19→import { Separator } from '@/components/ui/separator'
+    20→    20→    20→import {
+    21→    21→    21→  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+    22→    22→    22→} from '@/components/ui/select'
+    23→    23→    23→import {
+    24→    24→    24→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+    25→    25→    25→} from '@/components/ui/dialog'
+    26→    26→    26→import {
+    27→    27→    27→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    28→    28→    28→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    29→    29→    29→} from '@/components/ui/alert-dialog'
+    30→    30→    30→import { useState, useEffect, useRef } from 'react'
+    31→    31→    31→import { io, Socket } from 'socket.io-client'
+    32→    32→    32→import { toast } from 'sonner'
+    33→    33→    33→
+    34→    34→    34→// Bangalore city bounds for our map projection
+    35→    35→    35→const BOUNDS = { minLat: 12.88, maxLat: 13.25, minLng: 77.50, maxLng: 77.75 }
+    36→    36→    36→
+    37→    37→    37→function project(lat: number, lng: number, w: number, h: number) {
+    38→    38→    38→  const x = ((lng - BOUNDS.minLng) / (BOUNDS.maxLng - BOUNDS.minLng)) * w
+    39→    39→    39→  const y = ((BOUNDS.maxLat - lat) / (BOUNDS.maxLat - BOUNDS.minLat)) * h
+    40→    40→    40→  return { x, y }
+    41→    41→    41→}
+    42→    42→    42→
+    43→    43→    43→// Vehicle colors by index
+    44→    44→    44→const VEH_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#f43f5e', '#8b5cf6', '#0ea5e9']
+    45→    45→    45→
+    46→    46→    46→interface LiveVehicle {
+    47→    47→    47→  id: string; vehicleNo: string; routeName: string; driverName: string
+    48→    48→    48→  lat: number; lng: number; speed: number; heading: number; status: string
+    49→    49→    49→  lastUpdate: string
+    50→    50→    50→}
+    51→    51→    51→
+    52→    52→    52→interface Stop {
+    53→    53→    53→  id: string; name: string; routeName: string; lat: number; lng: number
+    54→    54→    54→  pickupTime: string; dropTime: string; fare: number
+    55→    55→    55→}
+    56→    56→    56→
+    57→    57→    57→const VEHICLE_TYPES = ['Bus', 'Mini Bus', 'Van', 'Car'] as const
+    58→    58→    58→
+    59→    59→    59→export function TransportModule() {
+    60→    60→    60→  const [liveVehicles, setLiveVehicles] = useState<LiveVehicle[]>([])
+    61→    61→    61→  const [selectedId, setSelectedId] = useState<string | null>(null)
+    62→    62→    62→  const [connected, setConnected] = useState(false)
+    63→    63→    63→  const socketRef = useRef<Socket | null>(null)
+    64→    64→    64→  const qc = useQueryClient()
+    65→    65→    65→
+    66→    66→    66→  const canCreate = useCan()('transport', 'create')
+    67→    67→    67→  const canEdit = useCan()('transport', 'edit')
+    68→    68→    68→  const canDelete = useCan()('transport', 'delete')
+    69→    69→    69→
+    70→    70→    70→  const [vehicleDialog, setVehicleDialog] = useState<{ mode: 'create' | 'edit'; target?: Vehicle } | null>(null)
+    71→    71→    71→  const [vehicleDelete, setVehicleDelete] = useState<Vehicle | null>(null)
+    72→    72→    72→  const [stopDialog, setStopDialog] = useState(false)
+    73→    73→    73→  const [stopDelete, setStopDelete] = useState<Stop | null>(null)
+    74→    74→    74→
+    75→    75→    75→  const { data: vehicles, isLoading } = useQuery({ queryKey: ['vehicles'], queryFn: api.transport.vehicles, refetchInterval: connected ? false : 3000 })
+    76→    76→    76→  const { data: stops } = useQuery({ queryKey: ['stops'], queryFn: api.transport.stops })
+    77→    77→    77→
+    78→    78→    78→  const createVehicleMut = useMutation({
+    79→    79→    79→    mutationFn: (data: any) => api.transport.createVehicle(data),
+    80→    80→    80→    onSuccess: () => {
+    81→    81→    81→      toast.success('Vehicle added', { description: 'The new vehicle has been added to the fleet.' })
+    82→    82→    82→      qc.invalidateQueries({ queryKey: ['vehicles'] })
+    83→    83→    83→      setVehicleDialog(null)
+    84→    84→    84→    },
+    85→    85→    85→    onError: () => toast.error('Failed to add vehicle'),
+    86→    86→    86→  })
+    87→    87→    87→
+    88→    88→    88→  const updateVehicleMut = useMutation({
+    89→    89→    89→    mutationFn: ({ id, data }: { id: string; data: any }) => api.transport.updateVehicle(id, data),
+    90→    90→    90→    onSuccess: () => {
+    91→    91→    91→      toast.success('Vehicle updated', { description: 'The vehicle record has been saved.' })
+    92→    92→    92→      qc.invalidateQueries({ queryKey: ['vehicles'] })
+    93→    93→    93→      setVehicleDialog(null)
+    94→    94→    94→    },
+    95→    95→    95→    onError: () => toast.error('Failed to update vehicle'),
+    96→    96→    96→  })
+    97→    97→    97→
+    98→    98→    98→  const deleteVehicleMut = useMutation({
+    99→    99→    99→    mutationFn: (id: string) => api.transport.deleteVehicle(id),
+   100→   100→   100→    onSuccess: () => {
+   101→   101→   101→      toast.success('Vehicle deleted', { description: 'The vehicle has been removed from the fleet.' })
+   102→   102→   102→      qc.invalidateQueries({ queryKey: ['vehicles'] })
+   103→   103→   103→      setVehicleDelete(null)
+   104→   104→   104→      if (selectedId) setSelectedId(null)
+   105→   105→   105→    },
+   106→   106→   106→    onError: () => toast.error('Failed to delete vehicle'),
+   107→   107→   107→  })
+   108→   108→   108→
+   109→   109→   109→  const createStopMut = useMutation({
+   110→   110→   110→    mutationFn: (data: any) => api.transport.createStop(data),
+   111→   111→   111→    onSuccess: () => {
+   112→   112→   112→      toast.success('Stop added', { description: 'The new route stop has been created.' })
+   113→   113→   113→      qc.invalidateQueries({ queryKey: ['stops'] })
+   114→   114→   114→      setStopDialog(false)
+   115→   115→   115→    },
+   116→   116→   116→    onError: () => toast.error('Failed to add stop'),
+   117→   117→   117→  })
+   118→   118→   118→
+   119→   119→   119→  const deleteStopMut = useMutation({
+   120→   120→   120→    mutationFn: (id: string) => api.transport.deleteStop(id),
+   121→   121→   121→    onSuccess: () => {
+   122→   122→   122→      toast.success('Stop deleted', { description: 'The route stop has been removed.' })
+   123→   123→   123→      qc.invalidateQueries({ queryKey: ['stops'] })
+   124→   124→   124→      setStopDelete(null)
+   125→   125→   125→    },
+   126→   126→   126→    onError: () => toast.error('Failed to delete stop'),
+   127→   127→   127→  })
+   128→   128→   128→
+   129→   129→   129→  // Connect to live GPS tracker mini-service via socket.io (port 3003, XTransformPort)
+   130→   130→   130→  useEffect(() => {
+   131→   131→   131→    const socket = io('/?XTransformPort=3003', { transports: ['websocket', 'polling'], forceNew: true, reconnection: true })
+   132→   132→   132→    socketRef.current = socket
+   133→   133→   133→    socket.on('connect', () => { setConnected(true); toast.success('Live GPS tracking connected') })
+   134→   134→   134→    socket.on('disconnect', () => setConnected(false))
+   135→   135→   135→    socket.on('vehicles:update', (data: LiveVehicle[]) => {
+   136→   136→   136→      setLiveVehicles(data)
+   137→   137→   137→      // refresh the persisted vehicle list occasionally
+   138→   138→   138→    })
+   139→   139→   139→    return () => { socket.disconnect() }
+   140→   140→   140→  }, [])
+   141→   141→   141→
+   142→   142→   142→  const merged: LiveVehicle[] = liveVehicles.length ? liveVehicles : (vehicles || []).map(v => ({
+   143→   143→   143→    id: v.id, vehicleNo: v.vehicleNo, routeName: v.routeName, driverName: v.driverName,
+   144→   144→   144→    lat: v.currentLat || 0, lng: v.currentLng || 0, speed: v.speed || 0, heading: v.heading || 0,
+   145→   145→   145→    status: v.status, lastUpdate: v.lastUpdate || new Date().toISOString(),
+   146→   146→   146→  }))
+   147→   147→   147→
+   148→   148→   148→  const moving = merged.filter(v => v.status === 'Moving').length
+   149→   149→   149→  const stopped = merged.filter(v => v.status === 'Stopped').length
+   150→   150→   150→  const selected = merged.find(v => v.id === selectedId) || merged[0]
+   151→   151→   151→  // Original vehicle record (with all fields) for edit/delete operations
+   152→   152→   152→  const selectedVehicle: Vehicle | undefined = (vehicles || []).find(v => v.id === selected?.id)
+   153→   153→   153→
+   154→   154→   154→  return (
+   155→   155→   155→    <div className="space-y-5">
+   156→   156→   156→      {/* Stat cards */}
+   157→   157→   157→      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+   158→   158→   158→        <StatCard label="Total Fleet" value={merged.length} sub="Buses & Vans" icon={Bus} accent="primary" loading={isLoading} />
+   159→   159→   159→        <StatCard label="Moving Now" value={moving} sub="Live on route" icon={Navigation} accent="emerald" loading={isLoading} />
+   160→   160→   160→        <StatCard label="At Stops" value={stopped} sub="Loading/unloading" icon={MapPin} accent="amber" loading={isLoading} />
+   161→   161→   161→        <StatCard label="GPS Status" value={connected ? 'Online' : 'Connecting'} sub={connected ? 'Real-time sync' : 'Establishing link'} icon={Radio} accent={connected ? 'emerald' : 'rose'} />
+   162→   162→   162→      </div>
+   163→   163→   163→
+   164→   164→   164→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+   165→   165→   165→        {/* Live Map */}
+   166→   166→   166→        <Card className="lg:col-span-2 overflow-hidden">
+   167→   167→   167→          <CardHeader className="pb-2">
+   168→   168→   168→            <CardTitle className="text-sm font-medium flex items-center gap-2">
+   169→   169→   169→              <Navigation className="size-4 text-primary" /> Live Fleet Map
+   170→   170→   170→              {connected && <span className="ml-auto flex items-center gap-1.5 text-[11px] text-emerald-600"><span className="size-2 rounded-full bg-emerald-500 animate-pulse" /> LIVE</span>}
+   171→   171→   171→            </CardTitle>
+   172→   172→   172→          </CardHeader>
+   173→   173→   173→          <CardContent className="p-0">
+   174→   174→   174→            <LiveMap vehicles={merged} stops={stops || []} selectedId={selected?.id} onSelect={setSelectedId} />
+   175→   175→   175→          </CardContent>
+   176→   176→   176→        </Card>
+   177→   177→   177→
+   178→   178→   178→        {/* Vehicle list */}
+   179→   179→   179→        <Card>
+   180→   180→   180→          <CardHeader className="pb-2">
+   181→   181→   181→            <div className="flex items-center justify-between gap-2">
+   182→   182→   182→              <CardTitle className="text-sm font-medium flex items-center gap-2"><Bus className="size-4 text-primary" /> Fleet Status</CardTitle>
+   183→   183→   183→              {canCreate && (
+   184→   184→   184→                <Button size="sm" className="gap-1.5 h-8" onClick={() => setVehicleDialog({ mode: 'create' })}>
+   185→   185→   185→                  <Plus className="size-3.5" /> <span className="hidden sm:inline">Add Vehicle</span><span className="sm:hidden">Add</span>
+   186→   186→   186→                </Button>
+   187→   187→   187→              )}
+   188→   188→   188→            </div>
+   189→   189→   189→          </CardHeader>
+   190→   190→   190→          <CardContent className="p-0">
+   191→   191→   191→            <ScrollArea className="h-[420px]">
+   192→   192→   192→              <div className="p-3 space-y-2">
+   193→   193→   193→                {isLoading ? Array.from({length:6}).map((_,i) => <Skeleton key={i} className="h-16 w-full" />) :
+   194→   194→   194→                  merged.map((v, i) => (
+   195→   195→   195→                    <button key={v.id} onClick={() => setSelectedId(v.id)} className={`w-full text-left p-3 rounded-lg border transition-all ${selected?.id === v.id ? 'border-primary bg-primary/5' : 'hover:bg-muted'}`}>
+   196→   196→   196→                      <div className="flex items-center gap-2.5">
+   197→   197→   197→                        <div className="size-9 rounded-lg grid place-items-center shrink-0 text-white" style={{ background: VEH_COLORS[i % VEH_COLORS.length] }}>
+   198→   198→   198→                          <Bus className="size-4" />
+   199→   199→   199→                        </div>
+   200→   200→   200→                        <div className="min-w-0 flex-1">
+   201→   201→   201→                          <div className="flex items-center justify-between gap-2">
+   202→   202→   202→                            <span className="text-sm font-medium truncate">{v.vehicleNo}</span>
+   203→   203→   203→                            <StatusBadge status={v.status} />
+   204→   204→   204→                          </div>
+   205→   205→   205→                          <div className="text-[11px] text-muted-foreground truncate">{v.routeName}</div>
+   206→   206→   206→                          <div className="flex items-center gap-3 mt-0.5 text-[11px]">
+   207→   207→   207→                            <span className="flex items-center gap-0.5"><Gauge className="size-3" /> {v.speed} km/h</span>
+   208→   208→   208→                            <span className="flex items-center gap-0.5"><Users className="size-3" /> {Math.floor(Math.random()*30)+15}/{45}</span>
+   209→   209→   209→                          </div>
+   210→   210→   210→                        </div>
+   211→   211→   211→                      </div>
+   212→   212→   212→                    </button>
+   213→   213→   213→                  ))
+   214→   214→   214→                }
+   215→   215→   215→              </div>
+   216→   216→   216→            </ScrollArea>
+   217→   217→   217→          </CardContent>
+   218→   218→   218→        </Card>
+   219→   219→   219→      </div>
+   220→   220→   220→
+   221→   221→   221→      {/* Selected vehicle detail */}
+   222→   222→   222→      {selected && (
+   223→   223→   223→        <Card>
+   224→   224→   224→          <CardContent className="p-5">
+   225→   225→   225→            <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+   226→   226→   226→              <div className="md:col-span-1">
+   227→   227→   227→                <div className="flex items-center gap-3 mb-3">
+   228→   228→   228→                  <div className="size-12 rounded-xl grid place-items-center text-white" style={{ background: VEH_COLORS[merged.findIndex(v => v.id === selected.id) % VEH_COLORS.length] }}>
+   229→   229→   229→                    <Bus className="size-6" />
+   230→   230→   230→                  </div>
+   231→   231→   231→                  <div>
+   232→   232→   232→                    <h3 className="font-bold">{selected.vehicleNo}</h3>
+   233→   233→   233→                    <p className="text-xs text-muted-foreground">{selected.routeName}</p>
+   234→   234→   234→                  </div>
+   235→   235→   235→                </div>
+   236→   236→   236→                <StatusBadge status={selected.status} />
+   237→   237→   237→              </div>
+   238→   238→   238→              <div className="md:col-span-2 grid grid-cols-2 gap-3">
+   239→   239→   239→                <Metric icon={Gauge} label="Current Speed" value={`${selected.speed} km/h`} />
+   240→   240→   240→                <Metric icon={Navigation} label="Heading" value={`${selected.heading}°`} />
+   241→   241→   241→                <Metric icon={MapPin} label="Latitude" value={selected.lat.toFixed(5)} />
+   242→   242→   242→                <Metric icon={MapPin} label="Longitude" value={selected.lng.toFixed(5)} />
+   243→   243→   243→                <Metric icon={Phone} label="Driver" value={selected.driverName} />
+   244→   244→   244→                <Metric icon={Activity} label="Last Update" value={new Date(selected.lastUpdate).toLocaleTimeString('en-IN')} />
+   245→   245→   245→              </div>
+   246→   246→   246→              <div className="md:col-span-1 space-y-2">
+   247→   247→   247→                {(canEdit || canDelete) && selectedVehicle && (
+   248→   248→   248→                  <>
+   249→   249→   249→                    <div className="flex gap-2">
+   250→   250→   250→                      {canEdit && (
+   251→   251→   251→                        <Button className="flex-1 gap-1.5" variant="outline" size="sm" onClick={() => setVehicleDialog({ mode: 'edit', target: selectedVehicle })}>
+   252→   252→   252→                          <Pencil className="size-3.5" /> Edit
+   253→   253→   253→                        </Button>
+   254→   254→   254→                      )}
+   255→   255→   255→                      {canDelete && (
+   256→   256→   256→                        <Button className="flex-1 gap-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10" variant="outline" size="sm" onClick={() => setVehicleDelete(selectedVehicle)}>
+   257→   257→   257→                          <Trash2 className="size-3.5" /> Delete
+   258→   258→   258→                        </Button>
+   259→   259→   259→                      )}
+   260→   260→   260→                    </div>
+   261→   261→   261→                    <Separator className="my-1" />
+   262→   262→   262→                  </>
+   263→   263→   263→                )}
+   264→   264→   264→                <Button className="w-full" variant="outline" onClick={() => toast.info('Sending pickup notification to parents…')}><MapPin className="size-4 mr-1.5" /> Notify Pickup</Button>
+   265→   265→   265→                <Button className="w-full" variant="outline" onClick={() => toast.info('Sending drop notification to parents…')}><Navigation className="size-4 mr-1.5" /> Notify Drop</Button>
+   266→   266→   266→                <Button className="w-full" variant="outline" onClick={() => toast.info('ETA calculation requested…')}><Activity className="size-4 mr-1.5" /> Calculate ETA</Button>
+   267→   267→   267→                <Separator className="my-2" />
+   268→   268→   268→                <div className="text-[11px] text-muted-foreground">Geofence: School campus (500m). Alerts on entry/exit.</div>
+   269→   269→   269→              </div>
+   270→   270→   270→            </div>
+   271→   271→   271→          </CardContent>
+   272→   272→   272→        </Card>
+   273→   273→   273→      )}
+   274→   274→   274→
+   275→   275→   275→      {/* Route stops table */}
+   276→   276→   276→      <Card>
+   277→   277→   277→        <CardHeader className="pb-2">
+   278→   278→   278→          <div className="flex items-center justify-between gap-2">
+   279→   279→   279→            <CardTitle className="text-sm font-medium">Route Stops & Pickups</CardTitle>
+   280→   280→   280→            {canCreate && (
+   281→   281→   281→              <Button size="sm" className="gap-1.5 h-8" onClick={() => setStopDialog(true)}>
+   282→   282→   282→                <Plus className="size-3.5" /> <span className="hidden sm:inline">Add Stop</span><span className="sm:hidden">Add</span>
+   283→   283→   283→              </Button>
+   284→   284→   284→            )}
+   285→   285→   285→          </div>
+   286→   286→   286→        </CardHeader>
+   287→   287→   287→        <CardContent className="p-0">
+   288→   288→   288→          <ScrollArea className="h-64">
+   289→   289→   289→            <div className="p-4 space-y-2">
+   290→   290→   290→              {(stops || []).length === 0 ? (
+   291→   291→   291→                <div className="text-center text-xs text-muted-foreground py-8">No route stops configured.</div>
+   292→   292→   292→              ) : (stops || []).map(s => (
+   293→   293→   293→                <div key={s.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted">
+   294→   294→   294→                  <div className="size-2 rounded-full bg-primary" />
+   295→   295→   295→                  <div className="flex-1 min-w-0">
+   296→   296→   296→                    <div className="text-sm font-medium truncate">{s.name}</div>
+   297→   297→   297→                    <div className="text-[11px] text-muted-foreground truncate">{s.routeName}</div>
+   298→   298→   298→                  </div>
+   299→   299→   299→                  <div className="text-xs text-muted-foreground hidden sm:block">Pickup: {s.pickupTime}</div>
+   300→   300→   300→                  <div className="text-xs text-muted-foreground hidden sm:block">Drop: {s.dropTime}</div>
+   301→   301→   301→                  <Badge variant="outline" className="text-[10px]">₹{s.fare}</Badge>
+   302→   302→   302→                  {canDelete && (
+   303→   303→   303→                    <Button size="icon" variant="ghost" className="size-7 text-rose-600 hover:text-rose-700 hover:bg-rose-500/10 shrink-0" title="Delete stop" onClick={() => setStopDelete(s)}>
+   304→   304→   304→                      <Trash2 className="size-3.5" />
+   305→   305→   305→                    </Button>
+   306→   306→   306→                  )}
+   307→   307→   307→                </div>
+   308→   308→   308→              ))}
+   309→   309→   309→            </div>
+   310→   310→   310→          </ScrollArea>
+   311→   311→   311→        </CardContent>
+   312→   312→   312→      </Card>
+   313→   313→   313→
+   314→   314→   314→      {vehicleDialog && (
+   315→   315→   315→        <VehicleFormDialog
+   316→   316→   316→          key={vehicleDialog.mode === 'edit' ? vehicleDialog.target?.id : 'create'}
+   317→   317→   317→          mode={vehicleDialog.mode}
+   318→   318→   318→          target={vehicleDialog.target}
+   319→   319→   319→          loading={createVehicleMut.isPending || updateVehicleMut.isPending}
+   320→   320→   320→          onClose={() => setVehicleDialog(null)}
+   321→   321→   321→          onSubmit={(data) => {
+   322→   322→   322→            if (vehicleDialog.mode === 'edit' && vehicleDialog.target) {
+   323→   323→   323→              updateVehicleMut.mutate({ id: vehicleDialog.target.id, data })
+   324→   324→   324→            } else {
+   325→   325→   325→              createVehicleMut.mutate(data)
+   326→   326→   326→            }
+   327→   327→   327→          }}
+   328→   328→   328→        />
+   329→   329→   329→      )}
+   330→   330→   330→
+   331→   331→   331→      {vehicleDelete && (
+   332→   332→   332→        <AlertDialog open onOpenChange={(o) => { if (!o) setVehicleDelete(null) }}>
+   333→   333→   333→          <AlertDialogContent>
+   334→   334→   334→            <AlertDialogHeader>
+   335→   335→   335→              <AlertDialogTitle>Delete vehicle?</AlertDialogTitle>
+   336→   336→   336→              <AlertDialogDescription>
+   337→   337→   337→                This will permanently delete <strong>{vehicleDelete.vehicleNo}</strong> ({vehicleDelete.type || 'Vehicle'}) — Driver: {vehicleDelete.driverName}, Route: {vehicleDelete.routeName}. This action cannot be undone.
+   338→   338→   338→              </AlertDialogDescription>
+   339→   339→   339→            </AlertDialogHeader>
+   340→   340→   340→            <AlertDialogFooter>
+   341→   341→   341→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+   342→   342→   342→              <AlertDialogAction
+   343→   343→   343→                className="bg-rose-600 hover:bg-rose-700 text-white"
+   344→   344→   344→                onClick={() => deleteVehicleMut.mutate(vehicleDelete.id)}
+   345→   345→   345→                disabled={deleteVehicleMut.isPending}
+   346→   346→   346→              >
+   347→   347→   347→                {deleteVehicleMut.isPending ? 'Deleting…' : 'Yes, delete'}
+   348→   348→   348→              </AlertDialogAction>
+   349→   349→   349→            </AlertDialogFooter>
+   350→   350→   350→          </AlertDialogContent>
+   351→   351→   351→        </AlertDialog>
+   352→   352→   352→      )}
+   353→   353→   353→
+   354→   354→   354→      {stopDialog && (
+   355→   355→   355→        <StopFormDialog
+   356→   356→   356→          loading={createStopMut.isPending}
+   357→   357→   357→          onClose={() => setStopDialog(false)}
+   358→   358→   358→          onSubmit={(data) => createStopMut.mutate(data)}
+   359→   359→   359→        />
+   360→   360→   360→      )}
+   361→   361→   361→
+   362→   362→   362→      {stopDelete && (
+   363→   363→   363→        <AlertDialog open onOpenChange={(o) => { if (!o) setStopDelete(null) }}>
+   364→   364→   364→          <AlertDialogContent>
+   365→   365→   365→            <AlertDialogHeader>
+   366→   366→   366→              <AlertDialogTitle>Delete stop?</AlertDialogTitle>
+   367→   367→   367→              <AlertDialogDescription>
+   368→   368→   368→                This will permanently delete the <strong>{stopDelete.name}</strong> stop on route <strong>{stopDelete.routeName}</strong> (Pickup {stopDelete.pickupTime}, Drop {stopDelete.dropTime}, Fare ₹{stopDelete.fare}). This action cannot be undone.
+   369→   369→   369→              </AlertDialogDescription>
+   370→   370→   370→            </AlertDialogHeader>
+   371→   371→   371→            <AlertDialogFooter>
+   372→   372→   372→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+   373→   373→   373→              <AlertDialogAction
+   374→   374→   374→                className="bg-rose-600 hover:bg-rose-700 text-white"
+   375→   375→   375→                onClick={() => deleteStopMut.mutate(stopDelete.id)}
+   376→   376→   376→                disabled={deleteStopMut.isPending}
+   377→   377→   377→              >
+   378→   378→   378→                {deleteStopMut.isPending ? 'Deleting…' : 'Yes, delete'}
+   379→   379→   379→              </AlertDialogAction>
+   380→   380→   380→            </AlertDialogFooter>
+   381→   381→   381→          </AlertDialogContent>
+   382→   382→   382→        </AlertDialog>
+   383→   383→   383→      )}
+   384→   384→   384→    </div>
+   385→   385→   385→  )
+   386→   386→   386→}
+   387→   387→   387→
+   388→   388→   388→// ============ Vehicle Create/Edit Dialog ============
+   389→   389→   389→function VehicleFormDialog({
+   390→   390→   390→  mode, target, loading, onClose, onSubmit,
+   391→   391→   391→}: {
+   392→   392→   392→  mode: 'create' | 'edit'
+   393→   393→   393→  target?: Vehicle
+   394→   394→   394→  loading: boolean
+   395→   395→   395→  onClose: () => void
+   396→   396→   396→  onSubmit: (data: any) => void
+   397→   397→   397→}) {
+   398→   398→   398→  const [vehicleNo, setVehicleNo] = useState(target?.vehicleNo ?? '')
+   399→   399→   399→  const [type, setType] = useState(target?.type ?? 'Bus')
+   400→   400→   400→  const [capacity, setCapacity] = useState(target ? String(target.capacity) : '45')
+   401→   401→   401→  const [driverName, setDriverName] = useState(target?.driverName ?? '')
+   402→   402→   402→  const [driverPhone, setDriverPhone] = useState(target?.driverPhone ?? '')
+   403→   403→   403→  const [routeName, setRouteName] = useState(target?.routeName ?? '')
+   404→   404→   404→
+   405→   405→   405→  const valid = vehicleNo.trim() && driverName.trim() && routeName.trim() && Number(capacity) >= 1
+   406→   406→   406→
+   407→   407→   407→  return (
+   408→   408→   408→    <Dialog open onOpenChange={onClose}>
+   409→   409→   409→      <DialogContent className="sm:max-w-md">
+   410→   410→   410→        <DialogHeader>
+   411→   411→   411→          <DialogTitle className="flex items-center gap-2">
+   412→   412→   412→            <Bus className="size-4 text-primary" />
+   413→   413→   413→            {mode === 'create' ? 'Add Vehicle' : 'Edit Vehicle'}
+   414→   414→   414→          </DialogTitle>
+   415→   415→   415→          <DialogDescription>
+   416→   416→   416→            {mode === 'create' ? 'Register a new vehicle in the fleet. Fields marked with * are required.' : `Update details for ${target?.vehicleNo}.`}
+   417→   417→   417→          </DialogDescription>
+   418→   418→   418→        </DialogHeader>
+   419→   419→   419→        <div className="space-y-3 py-1">
+   420→   420→   420→          <div className="grid grid-cols-2 gap-3">
+   421→   421→   421→            <div className="space-y-1.5">
+   422→   422→   422→              <Label htmlFor="vh-no">Vehicle No. *</Label>
+   423→   423→   423→              <Input id="vh-no" value={vehicleNo} onChange={(e) => setVehicleNo(e.target.value)} placeholder="KA01 AB 1234" />
+   424→   424→   424→            </div>
+   425→   425→   425→            <div className="space-y-1.5">
+   426→   426→   426→              <Label>Type</Label>
+   427→   427→   427→              <Select value={type} onValueChange={setType}>
+   428→   428→   428→                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+   429→   429→   429→                <SelectContent>
+   430→   430→   430→                  {VEHICLE_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+   431→   431→   431→                </SelectContent>
+   432→   432→   432→              </Select>
+   433→   433→   433→            </div>
+   434→   434→   434→          </div>
+   435→   435→   435→          <div className="grid grid-cols-2 gap-3">
+   436→   436→   436→            <div className="space-y-1.5">
+   437→   437→   437→              <Label htmlFor="vh-cap">Capacity *</Label>
+   438→   438→   438→              <Input id="vh-cap" type="number" min="1" value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="45" />
+   439→   439→   439→            </div>
+   440→   440→   440→            <div className="space-y-1.5">
+   441→   441→   441→              <Label htmlFor="vh-route">Route Name *</Label>
+   442→   442→   442→              <Input id="vh-route" value={routeName} onChange={(e) => setRouteName(e.target.value)} placeholder="Route 7 — Indiranagar" />
+   443→   443→   443→            </div>
+   444→   444→   444→          </div>
+   445→   445→   445→          <div className="grid grid-cols-2 gap-3">
+   446→   446→   446→            <div className="space-y-1.5">
+   447→   447→   447→              <Label htmlFor="vh-driver">Driver Name *</Label>
+   448→   448→   448→              <Input id="vh-driver" value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="Mr. Suresh" />
+   449→   449→   449→            </div>
+   450→   450→   450→            <div className="space-y-1.5">
+   451→   451→   451→              <Label htmlFor="vh-phone">Driver Phone</Label>
+   452→   452→   452→              <Input id="vh-phone" value={driverPhone} onChange={(e) => setDriverPhone(e.target.value)} placeholder="+91 98765 43210" />
+   453→   453→   453→            </div>
+   454→   454→   454→          </div>
+   455→   455→   455→        </div>
+   456→   456→   456→        <DialogFooter>
+   457→   457→   457→          <Button variant="outline" onClick={onClose}>Cancel</Button>
+   458→   458→   458→          <Button
+   459→   459→   459→            disabled={!valid || loading}
+   460→   460→   460→            onClick={() => onSubmit({
+   461→   461→   461→              vehicleNo: vehicleNo.trim(),
+   462→   462→   462→              type,
+   463→   463→   463→              capacity: Number(capacity),
+   464→   464→   464→              driverName: driverName.trim(),
+   465→   465→   465→              driverPhone: driverPhone.trim() || undefined,
+   466→   466→   466→              routeName: routeName.trim(),
+   467→   467→   467→            })}
+   468→   468→   468→          >
+   469→   469→   469→            {loading ? 'Saving…' : mode === 'create' ? 'Create Vehicle' : 'Save Changes'}
+   470→   470→   470→          </Button>
+   471→   471→   471→        </DialogFooter>
+   472→   472→   472→      </DialogContent>
+   473→   473→   473→    </Dialog>
+   474→   474→   474→  )
+   475→   475→   475→}
+   476→   476→   476→
+   477→   477→   477→// ============ Stop Create Dialog ============
+   478→   478→   478→function StopFormDialog({
+   479→   479→   479→  loading, onClose, onSubmit,
+   480→   480→   480→}: {
+   481→   481→   481→  loading: boolean
+   482→   482→   482→  onClose: () => void
+   483→   483→   483→  onSubmit: (data: any) => void
+   484→   484→   484→}) {
+   485→   485→   485→  const [name, setName] = useState('')
+   486→   486→   486→  const [routeName, setRouteName] = useState('')
+   487→   487→   487→  const [lat, setLat] = useState('')
+   488→   488→   488→  const [lng, setLng] = useState('')
+   489→   489→   489→  const [pickupTime, setPickupTime] = useState('07:00')
+   490→   490→   490→  const [dropTime, setDropTime] = useState('15:30')
+   491→   491→   491→  const [fare, setFare] = useState('0')
+   492→   492→   492→
+   493→   493→   493→  const valid = name.trim() && routeName.trim() && Number(lat) !== 0 && Number(lng) !== 0 && Number(fare) >= 0
+   494→   494→   494→
+   495→   495→   495→  return (
+   496→   496→   496→    <Dialog open onOpenChange={onClose}>
+   497→   497→   497→      <DialogContent className="sm:max-w-md">
+   498→   498→   498→        <DialogHeader>
+   499→   499→   499→          <DialogTitle className="flex items-center gap-2">
+   500→   500→   500→            <MapPin className="size-4 text-primary" /> Add Route Stop
+   501→   501→   501→          </DialogTitle>
+   502→   502→   502→          <DialogDescription>
+   503→   503→   503→            Define a pickup/drop stop with GPS coordinates and timing. Fields marked with * are required.
+   504→   504→   504→          </DialogDescription>
+   505→   505→   505→        </DialogHeader>
+   506→   506→   506→        <div className="space-y-3 py-1">
+   507→   507→   507→          <div className="grid grid-cols-2 gap-3">
+   508→   508→   508→            <div className="space-y-1.5">
+   509→   509→   509→              <Label htmlFor="st-name">Stop Name *</Label>
+   510→   510→   510→              <Input id="st-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Indiranagar 100ft Rd" />
+   511→   511→   511→            </div>
+   512→   512→   512→            <div className="space-y-1.5">
+   513→   513→   513→              <Label htmlFor="st-route">Route Name *</Label>
+   514→   514→   514→              <Input id="st-route" value={routeName} onChange={(e) => setRouteName(e.target.value)} placeholder="Route 7 — Indiranagar" />
+   515→   515→   515→            </div>
+   516→   516→   516→          </div>
+   517→   517→   517→          <div className="grid grid-cols-2 gap-3">
+   518→   518→   518→            <div className="space-y-1.5">
+   519→   519→   519→              <Label htmlFor="st-lat">Latitude *</Label>
+   520→   520→   520→              <Input id="st-lat" type="number" step="any" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="12.9716" />
+   521→   521→   521→            </div>
+   522→   522→   522→            <div className="space-y-1.5">
+   523→   523→   523→              <Label htmlFor="st-lng">Longitude *</Label>
+   524→   524→   524→              <Input id="st-lng" type="number" step="any" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="77.6058" />
+   525→   525→   525→            </div>
+   526→   526→   526→          </div>
+   527→   527→   527→          <div className="grid grid-cols-2 gap-3">
+   528→   528→   528→            <div className="space-y-1.5">
+   529→   529→   529→              <Label htmlFor="st-pickup">Pickup Time</Label>
+   530→   530→   530→              <Input id="st-pickup" type="time" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} />
+   531→   531→   531→            </div>
+   532→   532→   532→            <div className="space-y-1.5">
+   533→   533→   533→              <Label htmlFor="st-drop">Drop Time</Label>
+   534→   534→   534→              <Input id="st-drop" type="time" value={dropTime} onChange={(e) => setDropTime(e.target.value)} />
+   535→   535→   535→            </div>
+   536→   536→   536→          </div>
+   537→   537→   537→          <div className="space-y-1.5">
+   538→   538→   538→            <Label htmlFor="st-fare">Fare (₹) *</Label>
+   539→   539→   539→            <Input id="st-fare" type="number" min="0" value={fare} onChange={(e) => setFare(e.target.value)} placeholder="1200" />
+   540→   540→   540→          </div>
+   541→   541→   541→        </div>
+   542→   542→   542→        <DialogFooter>
+   543→   543→   543→          <Button variant="outline" onClick={onClose}>Cancel</Button>
+   544→   544→   544→          <Button
+   545→   545→   545→            disabled={!valid || loading}
+   546→   546→   546→            onClick={() => onSubmit({
+   547→   547→   547→              name: name.trim(),
+   548→   548→   548→              routeName: routeName.trim(),
+   549→   549→   549→              lat: Number(lat),
+   550→   550→   550→              lng: Number(lng),
+   551→   551→   551→              pickupTime,
+   552→   552→   552→              dropTime,
+   553→   553→   553→              fare: Number(fare),
+   554→   554→   554→            })}
+   555→   555→   555→          >
+   556→   556→   556→            {loading ? 'Saving…' : 'Add Stop'}
+   557→   557→   557→          </Button>
+   558→   558→   558→        </DialogFooter>
+   559→   559→   559→      </DialogContent>
+   560→   560→   560→    </Dialog>
+   561→   561→   561→  )
+   562→   562→   562→}
+   563→   563→   563→
+   564→   564→   564→function Metric({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
+   565→   565→   565→  return (
+   566→   566→   566→    <div className="p-2.5 rounded-lg bg-muted/50">
+   567→   567→   567→      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-0.5"><Icon className="size-3" /> {label}</div>
+   568→   568→   568→      <div className="text-sm font-medium tabular-nums truncate">{value}</div>
+   569→   569→   569→    </div>
+   570→   570→   570→  )
+   571→   571→   571→}
+   572→   572→   572→
+   573→   573→   573→function LiveMap({ vehicles, stops, selectedId, onSelect }: {
+   574→   574→   574→  vehicles: LiveVehicle[]; stops: any[]; selectedId?: string; onSelect: (id: string) => void
+   575→   575→   575→}) {
+   576→   576→   576→  const W = 600, H = 420
+   577→   577→   577→  const [tick, setTick] = useState(0)
+   578→   578→   578→  useEffect(() => { const t = setInterval(() => setTick(t => t+1), 1500); return () => clearInterval(t) }, [])
+   579→   579→   579→
+   580→   580→   580→  return (
+   581→   581→   581→    <div className="relative bg-emerald-950/95 dark:bg-emerald-950" style={{ aspectRatio: `${W}/${H}` }}>
+   582→   582→   582→      <svg viewBox={`0 0 ${W} ${H}`} className="absolute inset-0 w-full h-full">
+   583→   583→   583→        {/* Grid */}
+   584→   584→   584→        <defs>
+   585→   585→   585→          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+   586→   586→   586→            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
+   587→   587→   587→          </pattern>
+   588→   588→   588→          <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+   589→   589→   589→            <stop offset="0%" stopColor="rgba(16,185,129,0.4)" />
+   590→   590→   590→            <stop offset="100%" stopColor="rgba(16,185,129,0)" />
+   591→   591→   591→          </radialGradient>
+   592→   592→   592→        </defs>
+   593→   593→   593→        <rect width={W} height={H} fill="url(#grid)" />
+   594→   594→   594→
+   595→   595→   595→        {/* Fake road network — decorative paths */}
+   596→   596→   596→        {[
+   597→   597→   597→          'M 40 60 Q 200 100 320 180 T 560 360',
+   598→   598→   598→          'M 80 380 Q 200 300 380 240 T 560 80',
+   599→   599→   599→          'M 300 20 L 300 400',
+   600→   600→   600→          'M 20 200 L 580 200',
+   601→   601→   601→          'M 120 40 Q 250 250 480 380',
+   602→   602→   602→        ].map((d, i) => (
+   603→   603→   603→          <path key={i} d={d} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="3" strokeLinecap="round" strokeDasharray={i % 2 ? '0' : '8 6'} />
+   604→   604→   604→        ))}
+   605→   605→   605→
+   606→   606→   606→        {/* School location (center) */}
+   607→   607→   607→        {(() => { const p = project(12.9716, 77.6058, W, H); return (
+   608→   608→   608→          <g>
+   609→   609→   609→            <circle cx={p.x} cy={p.y} r="28" fill="url(#glow)" />
+   610→   610→   610→            <circle cx={p.x} cy={p.y} r="10" fill="#10b981" stroke="#fff" strokeWidth="2" />
+   611→   611→   611→            <text x={p.x} y={p.y - 16} fill="#fff" fontSize="10" textAnchor="middle" fontWeight="600">🏫 School</text>
+   612→   612→   612→          </g>
+   613→   613→   613→        )})()}
+   614→   614→   614→
+   615→   615→   615→        {/* Stops */}
+   616→   616→   616→        {stops.map((s, i) => { const p = project(s.lat, s.lng, W, H); return (
+   617→   617→   617→          <g key={s.id}>
+   618→   618→   618→            <circle cx={p.x} cy={p.y} r="4" fill="#fbbf24" stroke="#fff" strokeWidth="1" opacity="0.8" />
+   619→   619→   619→            {i % 2 === 0 && <text x={p.x + 7} y={p.y + 3} fill="rgba(255,255,255,0.6)" fontSize="8">{s.name}</text>}
+   620→   620→   620→          </g>
+   621→   621→   621→        )})}
+   622→   622→   622→
+   623→   623→   623→        {/* Vehicle trails (simple line from last position) */}
+   624→   624→   624→        {vehicles.map((v, i) => {
+   625→   625→   625→          if (!v.lat || !v.lng) return null
+   626→   626→   626→          const p = project(v.lat, v.lng, W, H)
+   627→   627→   627→          const color = VEH_COLORS[i % VEH_COLORS.length]
+   628→   628→   628→          const isSel = selectedId === v.id
+   629→   629→   629→          // heading vector for direction arrow
+   630→   630→   630→          const rad = (v.heading * Math.PI) / 180
+   631→   631→   631→          const ax = p.x + Math.sin(rad) * 14
+   632→   632→   632→          const ay = p.y - Math.cos(rad) * 14
+   633→   633→   633→          return (
+   634→   634→   634→            <g key={v.id} className="cursor-pointer" onClick={() => onSelect(v.id)}>
+   635→   635→   635→              {v.status === 'Moving' && <circle cx={p.x} cy={p.y} r={isSel ? 22 : 16} fill={color} opacity="0.15" className="animate-ping" />}
+   636→   636→   636→              <circle cx={p.x} cy={p.y} r={isSel ? 12 : 9} fill={color} stroke="#fff" strokeWidth="2" />
+   637→   637→   637→              {v.status === 'Moving' && <path d={`M ${p.x} ${p.y} L ${ax} ${ay}`} stroke="#fff" strokeWidth="2" strokeLinecap="round" />}
+   638→   638→   638→              <text x={p.x} y={p.y + 1} fill="#fff" fontSize="8" textAnchor="middle" fontWeight="700">{i+1}</text>
+   639→   639→   639→              {isSel && <text x={p.x} y={p.y - 16} fill="#fff" fontSize="9" textAnchor="middle" fontWeight="600">{v.vehicleNo}</text>}
+   640→   640→   640→            </g>
+   641→   641→   641→          )
+   642→   642→   642→        })}
+   643→   643→   643→      </svg>
+   644→   644→   644→
+   645→   645→   645→      {/* Map overlay HUD */}
+   646→   646→   646→      <div className="absolute top-3 left-3 bg-black/50 backdrop-blur rounded-lg px-2.5 py-1.5 text-white text-[11px]">
+   647→   647→   647→        <div className="flex items-center gap-1.5"><Navigation className="size-3 text-emerald-400" /> Bangalore · Live</div>
+   648→   648→   648→        <div className="text-white/60 text-[10px]">{vehicles.length} vehicles tracked</div>
+   649→   649→   649→      </div>
+   650→   650→   650→      <div className="absolute bottom-3 right-3 bg-black/50 backdrop-blur rounded-lg px-2.5 py-1.5 text-white text-[10px] flex items-center gap-3">
+   651→   651→   651→        <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-emerald-400" /> Moving</span>
+   652→   652→   652→        <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-amber-400" /> Stop</span>
+   653→   653→   653→        <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-rose-400" /> Idle</span>
+   654→   654→   654→      </div>
+   655→   655→   655→      <div className="absolute bottom-3 left-3 bg-black/50 backdrop-blur rounded-lg px-2 py-1 text-white/70 text-[10px] tabular-nums">
+   656→   656→   656→        {new Date().toLocaleTimeString('en-IN')} · tick {tick}
+   657→   657→   657→      </div>
+   658→   658→   658→    </div>
+   659→   659→   659→  )
+   660→   660→   660→}
+   661→   661→   661→
