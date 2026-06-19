@@ -1,0 +1,289 @@
+     1→     1→     1→# Enterprise School ERP - Worklog
+     2→     2→     2→
+     3→     3→     3→This file tracks work across all agents working on the School ERP project.
+     4→     4→     4→
+     5→     5→     5→## Project Overview
+     6→     6→     6→A Vidyalaya-style Enterprise School ERP built with Next.js 16 (single `/` route, client-side module navigation via Zustand). 
+     7→     7→     7→- Database: Prisma + SQLite (file: db/custom.db), schema in prisma/schema.prisma
+     8→     8→     8→- Master entities: Student, Employee, Class, Section, Subject, Vehicle, Book, Asset, FeeStructure, Exam
+     9→     9→     9→- Seed: `bun prisma/seed.ts` → 463 students, 35 employees, 12038 attendance, 2778 fee invoices, exams, timetable, 6 vehicles w/ GPS, library, assets.
+    10→    10→    10→
+    11→    11→    11→## Architecture Decisions
+    12→    12→    12→- **Single route**: All modules render in `/` via Zustand `activeModule` state. Sidebar switches modules. NO other page routes.
+    13→    13→    13→- **API routes**: under `src/app/api/<module>/route.ts` — all return JSON.
+    14→    14→    14→- **State**: Zustand (`src/lib/store.ts`) for navigation; TanStack Query for server data (provider in layout).
+    15→    15→    15→- **Transport live GPS**: a mini-service (socket.io) on port 3003 simulates vehicle movement; frontend connects via `io('/?XTransformPort=3003')`.
+    16→    16→    16→- **AI**: LLM skill via `z-ai-web-dev-sdk` used in backend API routes only (`/api/ai/*`).
+    17→    17→    17→- **Theme**: Tailwind with emerald/teal accent (NOT indigo/blue). Light/dark via next-themes.
+    18→    18→    18→
+    19→    19→    19→## File Map (conventions)
+    20→    20→    20→- `src/lib/store.ts` — Zustand store (activeModule, sidebar, filters)
+    21→    21→    21→- `src/lib/api.ts` — typed fetch helpers for each module
+    22→    22→    22→- `src/lib/types.ts` — shared TS types
+    23→    23→    23→- `src/components/erp/layout.tsx` — ERP shell (sidebar + topbar + content)
+    24→    24→    24→- `src/components/erp/sidebar.tsx` — module navigation
+    25→    25→    25→- `src/components/erp/topbar.tsx` — top bar (search, notifications, theme, profile)
+    26→    26→    26→- `src/components/modules/<module>.tsx` — one file per module UI
+    27→    27→    27→- `src/app/api/<module>/route.ts` — CRUD endpoints
+    28→    28→    28→
+    29→    29→    29→---
+    30→    30→    30→Task ID: 1
+    31→    31→    31→Agent: main
+    32→    32→    32→Task: Build Prisma schema with master entities + seed data
+    33→    33→    33→
+    34→    34→    34→Work Log:
+    35→    35→    35→- Designed schema with 20+ models: AcademicYear, Class, Section, Subject, AdmissionEnquiry, Application, Student, Attendance, FeeStructure, FeeInvoice, Exam, ExamClass, ExamMark, TimetableSlot, Vehicle, TransportStop, Book, LibraryIssue, Employee, LeaveRequest, Payroll, Certificate, Notification, Asset
+    36→    36→    36→- Ran prisma format + db push + generate
+    37→    37→    37→- Wrote seed.ts producing realistic Bangalore-based school data
+    38→    38→    38→- Verified counts: 463 students, 35 employees, 12038 attendance, 2778 fee invoices, 6 GPS vehicles, library, assets, payroll
+    39→    39→    39→
+    40→    40→    40→Stage Summary:
+    41→    41→    41→- Database fully seeded and ready. Schema stable. Master entities in place for all modules.
+    42→    42→    42→
+    43→    43→    43→---
+    44→    44→    44→Task ID: 6,7
+    45→    45→    45→Agent: ui-modules
+    46→    46→    46→Task: Build Admissions + Academics module UI files
+    47→    47→    47→
+    48→    48→    48→Work Log:
+    49→    49→    49→- Read worklog and existing conventions (dashboard module, primitives, types, api, schema, sidebar).
+    50→    50→    50→- Extended `ClassInfo` type (`src/lib/types.ts`) to include `subjects[]` and `teacherName` on sections/subjects so the Subjects tab can render real data.
+    51→    51→    51→- Updated `/api/academics/classes/route.ts` to:
+    52→    52→    52→  - Include subject details (id, name, code, teacherId, teacherName).
+    53→    53→    53→  - Resolve teacher names from Employee records when `teacherId` is a real cuid, OR fall back to using the stored string directly (seed data stored the teacher NAME in `teacherId` rather than an Employee id — the heuristic `/^c[a-z0-9]{20,}$/i` distinguishes the two cases).
+    54→    54→    54→- Created `/src/components/modules/admissions.tsx` exporting `AdmissionsModule`:
+    55→    55→    55→  - Top: SectionHeader + 4 StatCards (Total Enquiries, Pending Applications, Approved This Year, Conversion Rate %).
+    56→    56→    56→  - Tabs: Pipeline Overview / Enquiries / Applications.
+    57→    57→    57→  - Pipeline Overview: 5-stage horizontal pipeline (Enquiry → Application → Test → Interview → Approved) with per-stage counts (combined from enquiries + applications statuses), percentage badges, totals strip + recent enquiries feed.
+    58→    58→    58→  - Enquiries: searchable table (Student / Parent / Phone / Class / Source / Status / Date / Actions) with dropdown to advance or reject status via `api.admissions.updateEnquiry`. Notes shown inline in the dropdown when present.
+    59→    59→    59→  - Applications: searchable table (Student / Parent / Class / Previous School / Status / Date / Actions) with "Verify / Schedule Test / Approve & Create Student / Reject" actions via `api.admissions.updateApplication`. Approve toasts "Student master record created".
+    60→    60→    60→  - New Enquiry dialog: controlled form (studentName, parentName, phone, email, classApplied select Class 1..10, source select Website/Walk-in/Referral, message) → `api.admissions.createEnquiry` + query invalidation + toast.
+    61→    61→    61→  - Skeletons via `loading` flags, EmptyState when no records, sticky table headers, scroll-thin containers, max-h-[60vh] on tables.
+    62→    62→    62→- Created `/src/components/modules/academics.tsx` exporting `AcademicsModule`:
+    63→    63→    63→  - SectionHeader "Academic Setup".
+    64→    64→    64→  - Two-pane layout: left = scrollable classes list (`max-h-[70vh]`, search input, per-class card with section/subject/student counts, click to select). Right = class header summary card + Tabs.
+    65→    65→    65→  - "Sections & Subjects" tab: sections grid (name, capacity, student count with utilisation bar that goes amber at 70%+ and rose at 90%+, class teacher) and subjects table (name, code badge, faculty).
+    66→    66→    66→  - "Timetable" tab: weekly grid Mon..Sat × periods with sticky header (and sticky Period column). Cells render subject + teacher + room + time. Section selector dropdown above the grid lets the user filter to a specific section (or "All sections" — first slot per cell wins when collapsed). EmptyState when class not selected or no timetable.
+    67→    67→    67→  - Effect-free auto-selection of first class (no set-state-in-effect).
+    68→    68→    68→  - Loading skeletons + error/empty states handled.
+    69→    69→    69→- Verified endpoints return correct shape after the API change: `/api/academics/classes` now returns `subjects[]` and resolved `teacherName` for both sections and subjects.
+    70→    70→    70→- Ran ESLint (`bun node_modules/eslint/bin/eslint.js src/components/modules/admissions.tsx src/components/modules/academics.tsx src/app/api/academics/classes/route.ts`) — clean, 0 errors/warnings.
+    71→    71→    71→- Ran `bunx tsc --noEmit` — no errors in any of the new/modified files (only pre-existing errors in other files: hr/payroll route, mini-services, skills — unrelated).
+    72→    72→    72→- Checked dev.log — no compile errors for the new modules.
+    73→    73→    73→
+    74→    74→    74→Stage Summary:
+    75→    75→    75→- Both `AdmissionsModule` and `AcademicsModule` are production-ready, lint-clean, type-safe, responsive (mobile-first with sm/lg breakpoints), and follow the emerald/teal accent convention.
+    76→    76→    76→- API: `GET /api/academics/classes` now returns subjects + resolved teacher names (backward-compatible additions only).
+    77→    77→    77→- Types: `ClassInfo` extended with `subjects[]` and `teacherName?` on section/subject — non-breaking.
+    78→    78→    78→- No `indigo`/`blue` palette used. All tables wrapped in `max-h-[60vh] overflow-y-auto scroll-thin` containers with sticky headers. All interactive elements have hover states. Loading skeletons via shadcn Skeleton. Empty states via the shared `EmptyState` primitive.
+    79→    79→    79→
+    80→    80→    80→---
+    81→    81→    81→Task ID: 8,10
+    82→    82→    82→Agent: ui-modules
+    83→    83→    83→Task: Build Attendance + Exams module UI files
+    84→    84→    84→
+    85→    85→    85→Work Log:
+    86→    86→    86→- Read worklog and existing conventions (dashboard, admissions, academics modules; primitives; types; api; sidebar).
+    87→    87→    87→- Extended `Exam` type (`src/lib/types.ts`) with optional `marksCount?: number` (returned by `/api/exams` but previously absent from the type).
+    88→    88→    88→- Extended `ExamMark` type with optional `className?: string` (returned by `/api/exams/marks` route — `m.student.class?.name || '-'` — but previously absent from the type). Non-breaking, additive.
+    89→    89→    89→- Created `/src/components/modules/attendance.tsx` exporting `AttendanceModule`:
+    90→    90→    90→  - Top: SectionHeader + 5 StatCards (Attendance Rate %, Present Today, Absent Today, Late Today, On Leave) sourced from `api.attendance.summary()`.
+    91→    91→    91→  - Tabs: "Mark Attendance" / "UHF / RFID Live".
+    92→    92→    92→  - Mark Attendance tab — `lg:grid-cols-3` two-column layout:
+    93→    93→    93→    - Left (lg:col-span-2) "Mark Attendance" panel: Class selector (Select from `api.academics.classes()`), native `<input type="date">` defaulting to today, fetches `api.attendance.classAttendance(classId, date)`. Per-student status button-group of 5 small color-coded buttons (P/A/L/LV/HD = Present=emerald, Absent=rose, Late=amber, Leave=sky, HalfDay=violet), with the active one filled and others tinted. "Mark All Present" sets all overrides to Present; "Save Attendance" diffs overrides against server statuses and `Promise.all` calls `api.attendance.mark` only for changed rows, then toasts "Attendance saved for N students". Reset edits whenever class or date changes (via onChange handlers, no set-state-in-effect). Dirty rows highlighted with bg-primary/5 + pulse dot. Count summary strip at top (Present/Absent/Late/Leave/HalfDay/Total) updates live. Tables wrapped in `max-h-[60vh] overflow-y-auto scroll-thin` with sticky header; mobile-responsive (hides Section column on small screens).
+    94→    94→    94→    - Right (lg:col-span-1) "Class-wise Attendance" card: horizontal bar list from `summary.byClass` sorted desc, with colored progress bar (emerald ≥90, amber ≥75, rose <75) and matching rate pill.
+    95→    95→    95→  - UHF / RFID Live tab: simulates an EPC Gen2 UHF gate reader at "Main Gate · Reader #VM-UHF-01". Left card shows reader health (frequency, protocol, range, today's reads, uptime %, RSSI dBm, errors), a "System Active" pulsing pill, and a Pause/Resume button. Right card shows a live "Live Tag Reads" table (last 10) where `setInterval` (setTimeout-based jittered 3-5s) pushes random student entries from `api.students.list({status:'Active'})` with IN/OUT direction icon (LogIn/DoorOpen), admission no., class, EPC tag code, and timestamp. Entries animate in. Loading skeletons + empty state handled. Cleanup via clearTimeout on unmount/toggle.
+    96→    96→    96→- Created `/src/components/modules/exams.tsx` exporting `ExamsModule`:
+    97→    97→    97→  - Top: SectionHeader "Examinations & Results" + 3 StatCards (Total Exams, Completed Exams, Total Marks Entered — computed from `api.exams.list()` with `marksCount` summed).
+    98→    98→    98→  - Two-pane `lg:grid-cols-3` layout:
+    99→    99→    99→    - Left (lg:col-span-1): scrollable exam cards list (`max-h-[70vh]`), each card showing exam name, type badge, date range (smart "1–5 Oct 2026" formatting when same month), status badge (via StatusBadge), and marks count. Click to select.
+   100→   100→   100→    - Right (lg:col-span-2): For the selected exam — gradient header card (name, date range, type, status, marks count) + class selector (Select from `api.academics.classes()`). Tabs:
+   101→   101→   101→      1. **Marks Sheet**: pivot table built from `api.exams.marks(examId, classId)` — rows = students (sorted by % desc), columns = subjects, cells show obtained with bg color (green ≥80%, amber ≥60%, rose <40%, muted otherwise). Sticky leftmost Student column + sticky header. Bottom TableFooter row shows subject averages with same color coding. Right columns show Total (obtained/max) and % with color pill. Loading skeleton + empty state handled.
+   102→   102→   102→      2. **Progress Card**: student dropdown (derived from marks), then a polished printable report card. School header banner "Vidyamatrix International School — Holistic Progress Card" with gradient + School icon. Student info strip (name, admission no., class, section). Scholastic Area table (subject/max/obtained/%/grade) with colored % pills + total row. Right pane has RadarChart of subject scores (%), plus attendance % (from `api.students.list`) and overall % tiles. Co-scholastic Area grid (Sports & Games / Art & Music / Behavior & Conduct / Life Skills) each with a local-only grade Select (A+/A/B+/B/C/D). Footer with generation date + "Download PDF" button that toasts "Generating PDF…".
+   103→   103→   103→      3. **Analysis**: 4-tile summary strip (Total Entries / Subjects / Class Average / Pass Rate) + 2-column grid with BarChart (subject-wise class average %) and PieChart (grade distribution A+/A/B+/B/C/D/F filtered to non-zero counts, emerald/teal/amber/rose/violet/sky/slate palette).
+   104→   104→   104→- All tabs reuse the same `api.exams.marks` query (same queryKey) so TanStack Query dedupes — single network request per (exam, class) pair.
+   105→   105→   105→- Used `useMemo` for the marks pivot, students-in-exam list, subject averages, and grade distribution to avoid recompute on re-render.
+   106→   106→   106→- Effect-free auto-selection of first exam + first class (no set-state-in-effect) — uses `effectiveX = state || (data[0]?.id ?? '')` pattern.
+   107→   107→   107→- Dev conventions followed: `'use client'` first line, TanStack Query + `@/lib/api` + `@/lib/types` + shared primitives imports, shadcn `@/components/ui/*` (card, button, badge, skeleton, tabs, table, select), `lucide-react` icons, `sonner` toast, `recharts` charts, emerald/teal accent only (NO indigo/blue), responsive mobile-first with sm/lg breakpoints, tables wrapped in `max-h-[60vh] overflow-y-auto scroll-thin`, `new Date(x).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })` date formatting.
+   108→   108→   108→- Fixed a React Compiler ESLint error in attendance.tsx: replaced `useMemo` (whose deps couldn't be inferred due to closure-over `displayStatus`) with an inline IIFE computation, letting the compiler auto-memoize. Removed unused `useMemo` import.
+   109→   109→   109→- Removed unused `react-hooks/exhaustive-deps` disable comments (rule is already off in eslint.config.mjs — directives were "unused").
+   110→   110→   110→- Fixed 3 TypeScript strict errors in exams.tsx: changed `let r = byStudent.get(...)` pattern to `const existing = ...; const r: PivotRow = existing ?? {...}` so the compiler narrows correctly; defaulted `className: m.className || '-'` in two spots to satisfy `string` (not `string | undefined`) on consumer types.
+   111→   111→   111→- Ran ESLint on both files — `0 errors, 0 warnings, exit 0`.
+   112→   112→   112→- Ran `bunx tsc --noEmit` — no errors in any of the new/modified files (only pre-existing errors in unrelated files).
+   113→   113→   113→- Checked `dev.log` — `✓ Compiled in 176ms` after the new files were added; no runtime errors from the modules.
+   114→   114→   114→
+   115→   115→   115→Stage Summary:
+   116→   116→   116→- Both `AttendanceModule` (`/src/components/modules/attendance.tsx`) and `ExamsModule` (`/src/components/modules/exams.tsx`) are production-ready, lint-clean, type-safe, responsive, and follow the emerald/teal accent convention.
+   117→   117→   117→- Types: `Exam` extended with optional `marksCount?` and `ExamMark` extended with optional `className?` — both non-breaking, additive, aligned with what the existing API routes already return.
+   118→   118→   118→- Attendance module supports both manual marking (with optimistic edits + diff-based save) and a simulated UHF/RFID live gate feed (representing the hardware-integration story in the architecture).
+   119→   119→   119→- Exams module delivers a marks pivot, a polished printable holistic progress card (with radar + co-scholastic grades), and exam-level analytics (subject averages + grade distribution).
+   120→   120→   120→- All interactive elements have hover states. Loading skeletons via shadcn Skeleton. Empty states via the shared `EmptyState` primitive. No `indigo`/`blue` palette used. Tables wrapped in `max-h-[60vh] overflow-y-auto scroll-thin` containers with sticky headers.
+   121→   121→   121→- Files ready to be wired into the ERP shell by the main agent (sidebar already lists `attendance` and `exams` module IDs).
+   122→   122→   122→
+   123→   123→   123→---
+   124→   124→   124→Task ID: 12
+   125→   125→   125→Agent: ui-modules
+   126→   126→   126→Task: Build Library + HR + Communication + Assets module UI files
+   127→   127→   127→
+   128→   128→   128→Work Log:
+   129→   129→   129→- Read worklog.md and reviewed existing conventions (dashboard, admissions, academics, attendance, exams modules; primitives; types.ts; api.ts; sidebar; relevant API routes for library, hr, communication, assets, ai/compose).
+   130→   130→   130→- Created `/src/components/modules/library.tsx` exporting `LibraryModule` (370 lines):
+   131→   131→   131→  - Top: SectionHeader "Library Management" + 4 StatCards (Total Books = sum of totalCopies, Available Now = sum of available, Issued = count where status=Issued, Overdue/Fined = count of overdue + with-fine).
+   132→   132→   132→  - Tabs: Catalog / Issued Books.
+   133→   133→   133→  - Catalog tab: debounced search input (350ms via setTimeout closure on the handler — no set-state-in-effect) calling `api.library.books(q)`. Table: Accession No, Title+Author+Publisher, Category badge, Available/Total with color coding (rose when 0, amber when ≤1, emerald otherwise), Rack, Price (INR), Issue button. Issue button opens a dialog with a searchable student picker sourced from `api.students.list()` (shows name, admission no, class, section, status badge). Selecting a student + clicking Issue calls `api.library.issue({bookId, studentId})` → toasts success → invalidates both books and issues queries.
+   134→   134→   134→  - Issued Books tab: table of all issues — Book (title + accession no), Student (name + admission no), Issue Date, Due Date (with Overdue badge), Status (StatusBadge), Fine (rose if > 0), Action (Return button for Issued status). Overdue rows (status=Issued && dueDate < now) tinted with `bg-rose-500/5`. Return button calls `api.library.return(id)` → toasts success with fine info if applicable.
+   135→   135→   135→- Created `/src/components/modules/hr.tsx` exporting `HrModule` (448 lines):
+   136→   136→   136→  - Top: SectionHeader "HR & Payroll" + 4 StatCards (Total Employees = count + active count sub, On Leave Today = count of PrincipalApproved leaves spanning today, Pending Leaves = count where status=Pending, Monthly Payroll = sum of netPay for current month, formatted with fmtINRShort).
+   137→   137→   137→  - Tabs: Employees / Leave Requests / Payroll.
+   138→   138→   138→  - Employees tab: searchable table (Emp Code, Name with initials avatar, Designation, Department, Phone, Joining Date, Salary, Status) + Department Select filter. Row click opens a detail dialog showing avatar, designation, department, status, gender, DOB, salary, email, phone, address.
+   139→   139→   139→  - Leave Requests tab: searchable + status-filterable table (Employee with emp code, Designation, Leave Type, Duration with day count, Reason, Status, Actions). Pending rows show three action buttons: HOD Approve (ShieldCheck icon, outline), Principal Approve (Crown icon, default), Reject (Ban icon, rose-tinted). All call `api.hr.approveLeave(id, status)` → toast + invalidate.
+   140→   140→   140→  - Payroll tab: `<input type="month">` selector (defaults to current YYYY-MM), "Run Payroll" button calling `api.hr.runPayroll(month)` → toast "{created} payslips created (of {total} active employees)". Table: Emp Code, Employee, Basic, Allowances (+green), Deductions (−rose), Net Pay (bold), Status, Action (Mark Paid button for Processed status that toasts "Payslip generated"). Sticky TableFooter shows totals row with sums for basic/allowances/deductions/net.
+   141→   141→   141→- Created `/src/components/modules/communication.tsx` exporting `CommunicationModule` (324 lines):
+   142→   142→   142→  - Top: SectionHeader "Communication Center" + 4 StatCards (SMS Sent, Email Sent, WhatsApp, Failed — computed by filtering `api.communication.list()` by channel+status=Sent or status=Failed).
+   143→   143→   143→  - Two-column layout `lg:grid-cols-3`:
+   144→   144→   144→    - Left (lg:col-span-1): "Compose Message" card (sticky on lg). Channel selector as 4-button grid (SMS/Email/WhatsApp/Push) with per-channel accent icons (emerald/sky/teal/violet). Recipient input (placeholder changes by channel — phone vs email). Subject input only shown when channel=Email. **AI Compose panel** — prominent, with `border-primary/30` + gradient background + Sparkles icon, contains Topic input + Audience input + "AI Compose Message" button calling `api.ai.composeMessage({channel, topic, audience})`. On success: fills message textarea (and subject for email), toasts "AI draft ready". Shows loading state with RefreshCw spinning icon. Message textarea with live char count. Category Select (Attendance/Fees/Exam/Transport/General). Send button calls `api.communication.send` → toasts "Message sent via {channel}" with recipient, then clears the form.
+   145→   145→   145→    - Right (lg:col-span-2): "Message History" card with channel filter Select + search input. Table: Channel (icon + label, color-coded), Recipient + Subject (if any) + Message (truncated), Category badge, Status (StatusBadge), Time. Filterable by channel and searchable.
+   146→   146→   146→- Created `/src/components/modules/assets.tsx` exporting `AssetsModule` (284 lines):
+   147→   147→   147→  - Top: SectionHeader "Assets & Inventory" + 4 StatCards (Total Assets + categories count, Total Value via fmtINRShort, In Good Condition + % of total, Needs Repair = Damaged + Under Repair).
+   148→   148→   148→  - Asset Value by Category: BarChart (recharts) with multi-color Cells using emerald/teal/amber/rose/violet/sky/lime/pink palette (no indigo/blue). Y-axis formatted with fmtINRShort. Tooltip shows full INR.
+   149→   149→   149→  - Asset Register: Card with category Select, condition Select (All/Good/Damaged/Under Repair), search input, and a "Group" toggle button. Flat view: table (Asset Code, Name, Category, Location, Purchase Value, Condition, Assigned To) with sticky header, sticky footer showing total count + total value, rose tint for Damaged rows, amber tint for Under Repair, click-to-toast asset info. Grouped view: divide-y sections per category, each with sticky sub-header showing category badge + count + subtotal, then a card grid (sm:2 / lg:3 cols) of asset cards with name, code, condition badge, location, value, assigned-to.
+   150→   150→   150→- All 4 files start with `'use client'`, use `useQuery`/`useMutation`/`useQueryClient` from `@tanstack/react-query`, import `api` from `@/lib/api`, types from `@/lib/types`, shared primitives from `@/components/erp/primitives`, shadcn `@/components/ui/*` components, `lucide-react` icons, `sonner` toast, and `recharts` charts. Tables wrapped in `max-h-[60vh] overflow-y-auto scroll-thin` containers with sticky headers. Date formatting via `new Date(x).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })`. INR via `Intl.NumberFormat('en-IN', { style:'currency', currency:'INR', maximumFractionDigits: 0 })`.
+   151→   151→   151→- No `indigo`/`blue` palette used anywhere. All interactive elements have hover states. Loading skeletons via shadcn Skeleton. Empty states via the shared `EmptyState` primitive.
+   152→   152→   152→- Lint cleanup: removed unused `Label` import and unused `fmtDate` helper from assets.tsx; moved `Cell` recharts import to the top imports block (had been at file bottom initially); simplified assets footer to single `colSpan={7}` cell with inner flex layout for cross-breakpoint consistency.
+   153→   153→   153→- Effect-free state management: no `useEffect` used anywhere. Library search uses setTimeout closure attached to the handler function for debouncing. No `react-hooks/set-state-in-effect` violations.
+   154→   154→   154→- Ran ESLint on all 4 files: `bun node_modules/eslint/bin/eslint.js src/components/modules/library.tsx src/components/modules/hr.tsx src/components/modules/communication.tsx src/components/modules/assets.tsx` → `0 errors, 0 warnings, exit 0`.
+   155→   155→   155→- Ran `bunx tsc --noEmit` → no errors in any of the 4 new files (only pre-existing errors in unrelated files: hr/payroll route, mini-services, skills).
+   156→   156→   156→- Checked `dev.log` — `✓ Compiled in 150ms` after the new files were added; no runtime errors from the modules.
+   157→   157→   157→
+   158→   158→   158→Stage Summary:
+   159→   159→   159→- All 4 module files (`library.tsx`, `hr.tsx`, `communication.tsx`, `assets.tsx`) are production-ready, lint-clean, type-safe, responsive (mobile-first with sm/md/lg/xl breakpoints), and follow the emerald/teal accent convention.
+   160→   160→   160→- Library: catalog with debounced server-side search + student-picker issue dialog, issued books table with overdue rose tinting and return action.
+   161→   161→   161→- HR: employees directory with detail dialog, leave requests with HOD/Principal/Reject workflow, payroll with month selector + run payroll + totals footer + mark paid action.
+   162→   162→   162→- Communication: 4-channel composer (SMS/Email/WhatsApp/Push) with a prominent AI Compose feature (highlighted panel calling `/api/ai/compose`) + filterable message history.
+   163→   163→   163→- Assets: bar chart of value by category + filterable asset register with a Group toggle (flat table with totals footer vs grouped card view with per-category subtotals) + row tints for damaged/under-repair.
+   164→   164→   164→- Files ready to be wired into the ERP shell by the main agent (sidebar already lists `library`, `hr`, `communication`, `assets` module IDs).
+   165→   165→   165→- Lint status: 4 files, 0 errors, 0 warnings, exit 0.
+   166→   166→   166→
+   167→   167→   167→---
+   168→   168→   168→Task ID: 4,5,9,11,13,14
+   169→   169→   169→Agent: main
+   170→   170→   170→Task: Build Dashboard, Students, Fees, Transport, Timetable, AI-Assistant modules + wire page.tsx + verify with agent browser
+   171→   171→   171→
+   172→   172→   172→Work Log:
+   173→   173→   173→- Built Dashboard/MIS module: AI insights banner, 8 KPI cards, attendance trend (area chart), fee collection (bar chart), gender ratio (pie), class distribution, recent activity feed, quick actions
+   174→   174→   174→- Built Students module: searchable/filterable table, profile drawer with personal/parent/transport/medical info, performance radar chart, fee history, 21-day attendance heatmap, ID card/bonafide actions, Add Student dialog
+   175→   175→   175→- Built Fees module: 4 KPI cards, collection overview + payment methods charts, Invoices/Defaulters/Structures/Accounting tabs, payment collection dialog (Cash/Card/Online/UPI), Tally/accounting export panel, ledger summary
+   176→   176→   176→- Built Transport module: live GPS map (custom SVG with Bangalore bounds), 6 vehicles tracked via socket.io mini-service (port 3003) with polling fallback, fleet status list, vehicle detail panel, route stops table
+   177→   177→   177→- Built Timetable module: weekly grid (Mon-Sat x 8 periods) with color-coded subjects, class/section selectors, subject legend
+   178→   178→   178→- Built AI Assistant module: full-page chat with live ERP context, AI-generated insights sidebar, suggestion prompts, capabilities panel
+   179→   179→   179→- Wired ErpLayout (sidebar + topbar + module router via Zustand) into page.tsx
+   180→   180→   180→- Fixed seed: normalized attendance dates to midnight (was causing 0 results due to time-component mismatch)
+   181→   181→   181→- Restarted dev server + transport tracker after DB reset to refresh PrismaClient singleton
+   182→   182→   182→- Verified ALL 14 modules render via agent-browser with 0 console errors
+   183→   183→   183→
+   184→   184→   184→Stage Summary:
+   185→   185→   185→- Complete ERP with 14 interconnected modules, all functional with real seeded data (456 students, 35 employees, 11856 attendance records, 2736 fee invoices, 6 live GPS buses, library, HR, payroll, assets).
+   186→   186→   186→- AI features (chat + insights + message compose) working via z-ai-web-dev-sdk.
+   187→   187→   187→- Live transport GPS tracking via socket.io mini-service on port 3003.
+   188→   188→   188→- Full ESLint passes (0 errors). Dev log clean (all 200s).
+   189→   189→   189→- Agent-browser verified: dashboard real data, student profile drawer, AI chat with live data, transport live map with moving buses, all module tabs render.
+   190→   190→   190→
+   191→   191→   191→---
+   192→   192→   192→Task ID: 9
+   193→   193→   193→Agent: rbac-ui-guards
+   194→   194→   194→Task: Add module-level RBAC permission guards to 5 existing ERP module UI files
+   195→   195→   195→
+   196→   196→   196→Work Log:
+   197→   197→   197→- Read worklog.md (architecture, conventions, prior agents' work) and the RBAC source of truth: `src/lib/rbac.ts` (PERMISSIONS matrix, AuthUser, can()) and `src/lib/store.ts` (useCan() hook returning `(module, action) => boolean`; useStore() exposing `user`).
+   198→   198→   198→- Verified backend already enforces permissions on all relevant routes (attendance/summary role-scopes to own/children/teacher-classes; exams/marks role-scopes to own/children/teacher-classes; students/list scoped; library/issues scoped). UI guards are purely additive (hide actions for restricted roles, never alter API calls or break admin/teacher flows).
+   199→   199→   199→- Files modified (5):
+   200→   200→   200→
+   201→   201→   201→1. `src/components/modules/attendance.tsx` — added `useCan`, `useStore`, `AuthUser`, `AttendanceRecord` imports; added `CalendarDays` to icon imports.
+   202→   202→   202→   - New `MyAttendancePanel` component (read-only, ~210 lines): shown when `!can('attendance','mark')` (i.e., students/parents).
+   203→   203→   203→     - Resolves linked student ids from `user.studentId` (student) or `user.childrenStudentIds` (parent).
+   204→   204→   204→     - For parents with multiple children: fetches visible students via `api.students.list()` (backend-scoped to children) and renders a child selector dropdown.
+   205→   205→   205→     - Fetches attendance records via `api.students.attendance(activeStudentId)`.
+   206→   206→   206→     - Computes last-30-day attendance rate from records (Present / Marked) and renders a big colored rate number (emerald ≥90, amber ≥75, rose <75) with a "Present / Marked" tile.
+   207→   207→   207→     - Renders a 30-day calendar grid (`grid-cols-7 sm:grid-cols-10`, color-coded cells: emerald=Present, rose=Absent, amber=Late, sky=Leave, violet=HalfDay, muted=not marked) with date number and tooltip.
+   208→   208→   208→     - Renders a "Recent Statuses" card listing the last 10 entries with status dot, date, and method.
+   209→   209→   209→     - Handles edge case: no linked student → EmptyState "No linked student".
+   210→   210→   210→   - Main `AttendanceModule`: reads `canMark = useCan()('attendance','mark')` and `user = useStore((s) => s.user)`.
+   211→   211→   211→     - Tabs `defaultValue` is now `canMark ? 'mark' : 'mine'`.
+   212→   212→   212→     - TabsList conditionally renders either `<TabsTrigger value="mark">Mark Attendance</TabsTrigger>` (staff) OR `<TabsTrigger value="mine">My Attendance / My Children</TabsTrigger>` (students/parents). UHF/RFID tab stays visible to all (additive).
+   213→   213→   213→     - TabsContent for "mark" (with MarkAttendancePanel + ClassWiseAttendance) only renders when `canMark`; otherwise TabsContent for "mine" renders MyAttendancePanel.
+   214→   214→   214→     - Existing 5 StatCards (Attendance Rate, Present Today, Absent Today, Late Today, On Leave) stay visible to all (backend already role-scopes the summary).
+   215→   215→   215→     - Existing teacher/admin mark-attendance flow is untouched.
+   216→   216→   216→
+   217→   217→   217→2. `src/components/modules/exams.tsx` — added `useCan`, `useStore` imports.
+   218→   218→   218→   - Main `ExamsModule`: reads `canEnter = useCan()('exams','enter')` and `isStudentOrParent`.
+   219→   219→   219→     - `effectiveClassId` is `''` for students/parents (backend scopes marks to their own/children's anyway), or `classId || classes[0]?.id` for staff.
+   220→   220→   220→     - Class selector in exam header is hidden for students/parents (replaced with italic note "Scoped to your record" / "Scoped to your children").
+   221→   221→   221→     - When `canEnter`, shows a small emerald "Can enter marks" badge next to the class selector.
+   222→   222→   222→     - Exam list, Progress Card, Analysis tabs all stay visible to all (read-only).
+   223→   223→   223→   - `MarksSheetTab`: added `useStore` to read `user`. For parents: derives `childrenWithMarks` from `user.childrenStudentIds` ∩ marks, renders a child selector dropdown at the top of the card header (only when >1 child has marks), and filters marks client-side to the selected child.
+   224→   224→   224→     - Added defensive comment: "any future marks-entry input / cell-editing UI MUST be wrapped in `useCan()('exams','enter')` so only teachers/admins can edit. The sheet below is read-only display — students/parents see only their own / children's marks (the backend enforces scoping)." No marks-entry input existed, so nothing to wrap; the guard is documented for future maintainers.
+   225→   225→   225→     - The `useMemo` (subjects/rows/subjectAverages) now consumes the (potentially filtered-for-parent) `marks` array — re-computes correctly when the selected child changes.
+   226→   226→   226→
+   227→   227→   227→3. `src/components/modules/hr.tsx` — added `useCan` import; added `ShieldAlert` icon.
+   228→   228→   228→   - Main `HrModule`: defensive `canView = useCan()('hr','view')` guard. All three useQuery hooks (employees, leaves, payroll) now pass `enabled: canView` so they don't fire when the user can't access HR. If `!canView`, renders `<EmptyState icon={ShieldAlert} title="Access Denied" description="You do not have permission to view the HR & Payroll module. Please contact an administrator if you believe this is an error." />` instead of loading data. (Handles the edge case where a user navigates directly to /hr.)
+   229→   229→   229→   - `LeavesTab`: `canApprove = useCan()('hr','approve')`. Pending rows now show either the HOD/Principal/Reject buttons (when `canApprove`) OR an italic "View only" text. Resolved rows still show "Resolved".
+   230→   230→   230→   - `PayrollTab`: `canRun = useCan()('hr','run')`. The "Run Payroll" button is wrapped in `{canRun && ...}`. The month selector, payroll table, totals footer, and Mark Paid action stay visible.
+   231→   231→   231→
+   232→   232→   232→4. `src/components/modules/library.tsx` — added `useCan` import.
+   233→   233→   233→   - `CatalogTab`: `canIssue = useCan()('library','issue')`. Per-book action cell:
+   234→   234→   234→     - When `canIssue`: existing "Issue" / "Unavailable" button (admin/teacher).
+   235→   235→   235→     - When `!canIssue` and `out`: "Unavailable" text (rose).
+   236→   236→   236→     - When `!canIssue` and available: "Available" text (emerald).
+   237→   237→   237→     - The `<IssueBookDialog>` is only mounted when `canIssue` (defensive — prevents the dialog from being opened even if state got into a bad state).
+   238→   238→   238→   - `IssuedTab`: `canReturn = useCan()('library','return')`. Per-issue action cell:
+   239→   239→   239→     - When status=Issued AND `canReturn`: existing "Return" button.
+   240→   240→   240→     - When status=Issued AND `!canReturn`: italic "Issued" text (read-only).
+   241→   241→   241→     - When status≠Issued: return date or "—" (unchanged).
+   242→   242→   242→     - Backend already scopes the issues list to the user's own/children's issues for students/parents.
+   243→   243→   243→
+   244→   244→   244→5. `src/components/modules/communication.tsx` — added `useCan` import.
+   245→   245→   245→   - `ComposeCard`: `canSend = useCan()('communication','send')`. The "Send {channel}" button is wrapped in `{canSend ? <Button>...</Button> : <notice>}`.
+   246→   246→   246→     - When `!canSend`: replaces the Send button with an amber-tinted notice card: "Sending is restricted to staff. You can still draft messages and use AI Compose."
+   247→   247→   247→     - AI Compose panel, channel selector, recipient/subject/message inputs, and Category select all stay visible to all (per spec — AI just drafts, doesn't send).
+   248→   248→   248→   - Message History card unchanged — all roles can view (backend scopes appropriately).
+   249→   249→   249→
+   250→   250→   250→- Conventions followed: `'use client'` first line preserved; `useCan`/`useStore` imported from `@/lib/store`; existing shadcn components + shared `EmptyState` primitive reused; no API calls or backend changes; emerald/teal accent only (NO indigo/blue); responsive (mobile-first with sm/md/lg/xl breakpoints); all guards are additive (hide for restricted roles, keep for admin).
+   251→   251→   251→- ESLint: `bun node_modules/eslint/bin/eslint.js src/components/modules/attendance.tsx src/components/modules/exams.tsx src/components/modules/hr.tsx src/components/modules/library.tsx src/components/modules/communication.tsx` → exit 0, 0 errors, 0 warnings.
+   252→   252→   252→- TypeScript: `bunx tsc --noEmit` → no errors in any of the 5 modified files (only pre-existing errors in unrelated files: examples/websocket, mini-services/transport-tracker, skills/*, src/app/api/hr/payroll/route, src/components/erp/sidebar, src/components/modules/students).
+   253→   253→   253→- Dev log: `✓ Compiled in 307ms` etc. — no compile errors after edits; transport tracker still streaming 200s.
+   254→   254→   254→
+   255→   255→   255→Stage Summary:
+   256→   256→   256→- 5 module files now enforce RBAC at the UI layer in addition to the existing backend enforcement:
+   257→   257→   257→  - **Attendance**: students/parents get a read-only "My Attendance" / "My Children's Attendance" panel (rate + 30-day calendar grid + recent statuses) with child selector for parents; teachers/admins keep the existing Mark Attendance + UHF/RFID Live tabs.
+   258→   258→   258→  - **Exams**: class selector hidden for students/parents (backend scopes marks); parent child selector added to Marks Sheet; can-enter-marks badge shown for staff; Progress Card and Analysis tabs visible to all.
+   259→   259→   259→  - **HR**: defensive Access-Denied EmptyState when `!can('hr','view')` (handles direct navigation); Approve buttons (HOD/Principal/Reject) hidden unless `can('hr','approve')`; Run Payroll button hidden unless `can('hr','run')`.
+   260→   260→   260→  - **Library**: Issue button hidden unless `can('library','issue')` (replaced with Available/Unavailable text); Return button hidden unless `can('library','return')` (replaced with "Issued" text).
+   261→   261→   261→  - **Communication**: Send Message button hidden unless `can('communication','send')` (replaced with amber notice that AI Compose is still available); AI Compose, draft inputs, and Message History visible to all.
+   262→   262→   262→- All guards are additive: admin/super_admin/teacher retain 100% of existing functionality. Students/parents see appropriate read-only views with their scoped data.
+   263→   263→   263→- Lint status: 5 files, 0 errors, 0 warnings, exit 0.
+   264→   264→   264→
+   265→   265→   265→---
+   266→   266→   266→Task ID: RBAC-1..10
+   267→   267→   267→Agent: main + subagent (task 9)
+   268→   268→   268→Task: Implement robust Role-Based Access Control (RBAC) system with Admin, Teacher, Student, Parent roles + granular per-module permissions
+   269→   269→   269→
+   270→   270→   270→Work Log:
+   271→   271→   271→- Extended Prisma schema: User (role, passwordHash, employeeId, studentId), TeacherClass junction, ParentChild junction; seeded 5 role accounts (super_admin, admin, teacher, student, parent) with scrypt-hashed passwords
+   272→   272→   272→- Built RBAC engine (src/lib/rbac.ts): permission matrix mapping Role × Module × Action[]; can()/accessibleModules()/actionsFor()/visibleStudentIds() helpers
+   273→   273→   273→- Built auth (src/lib/password.ts scrypt hashing; src/lib/auth.ts HMAC-signed session cookie + getCurrentUser() + requirePerm() guard)
+   274→   274→   274→- Auth API: /api/auth/login (sets httpOnly cookie), /logout, /me
+   275→   275→   275→- Client auth store (Zustand): user, authLoading, useCan()/useAccessibleModules() hooks
+   276→   276→   276→- LoginOverlay: branded split-screen with 5 demo-account quick-login buttons
+   277→   277→   277→- Sidebar filters modules by accessibleModules(role); Topbar shows role badge + Switch User dropdown; ErpLayout gates on auth (loading → login → app) with module-access guard
+   278→   278→   278→- Role-specific dashboards: StudentDashboard (own attendance/fees/marks/radar), ParentDashboard (child selector + per-child cards), TeacherDashboard (my classes + quick actions), AdminDashboard (full MIS)
+   279→   279→   279→- Backend enforcement on all key APIs: students/fees/exams/attendance scoped by role (student=own, parent=children, teacher=assigned classes); HR/assets/admissions/communication protected by requirePerm(); AI chat builds role-appropriate context (student/parent get personal data only, not institution-wide)
+   280→   280→   280→- Module-level UI guards: Students hides Add button; Fees shows Pay (student/parent) vs Collect (admin) + hides Defaulters/Accounting tabs; Attendance shows read-only "My Attendance" for students/parents; Exams hides marks entry; HR defensive guard; Library hides Issue/Return; Communication hides Send
+   281→   281→   281→- Fixed seed: attendance dates normalized to midnight for reliable date matching
+   282→   282→   282→- Verified via agent-browser: all 5 roles login, scoped dashboards render, sidebar filtering correct, student sees "My Attendance" + "Pay" buttons, AI gives scoped answers, backend returns 403 for forbidden actions
+   283→   283→   283→
+   284→   284→   284→Stage Summary:
+   285→   285→   285→- Complete RBAC: 5 roles, 14 modules × 13 actions permission matrix, data-scoped APIs, role-specific UIs.
+   286→   286→   286→- Demo accounts: superadmin/super123, admin/admin123, teacher/teacher123, student/student123, parent/parent123
+   287→   287→   287→- ESLint: 0 errors across entire src/. Dev server + transport tracker both healthy.
+   288→   288→   288→- Agent-browser verified: student/parent/teacher/admin all render correctly with appropriate access.
+   289→   289→   289→

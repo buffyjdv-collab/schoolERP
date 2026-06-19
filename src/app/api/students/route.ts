@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
-import { can } from '@/lib/rbac'
+import { canUser } from "@/lib/rbac"
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!can(user.role, 'students', 'view')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!canUser(user, 'students', 'view')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const q = searchParams.get('q') || ''
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!can(user.role, 'students', 'create')) return NextResponse.json({ error: 'Forbidden — your role cannot create students' }, { status: 403 })
+  if (!canUser(user, 'students', 'create')) return NextResponse.json({ error: 'Forbidden — your role cannot create students' }, { status: 403 })
 
   const body = await req.json()
   const count = await db.student.count()

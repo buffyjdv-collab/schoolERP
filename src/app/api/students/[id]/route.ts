@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
-import { can } from '@/lib/rbac'
+import { canUser } from "@/lib/rbac"
 
 async function canAccessStudent(studentId: string) {
   const user = await getCurrentUser()
   if (!user) return { ok: false as const, res: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
-  if (!can(user.role, 'students', 'view')) return { ok: false as const, res: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+  if (!canUser(user, 'students', 'view')) return { ok: false as const, res: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   // Admin/super_admin: all. Teacher: only assigned classes. Student: only self. Parent: only children.
   if (user.role === 'super_admin' || user.role === 'admin') return { ok: true as const, user }
   if (user.role === 'student') {
@@ -45,7 +45,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!can(user.role, 'students', 'edit')) return NextResponse.json({ error: 'Forbidden — your role cannot edit students' }, { status: 403 })
+  if (!canUser(user, 'students', 'edit')) return NextResponse.json({ error: 'Forbidden — your role cannot edit students' }, { status: 403 })
   const body = await req.json()
   const s = await db.student.update({ where: { id }, data: {
     firstName: body.firstName, lastName: body.lastName, gender: body.gender,
@@ -62,7 +62,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!can(user.role, 'students', 'delete')) return NextResponse.json({ error: 'Forbidden — your role cannot delete students' }, { status: 403 })
+  if (!canUser(user, 'students', 'delete')) return NextResponse.json({ error: 'Forbidden — your role cannot delete students' }, { status: 403 })
   // Soft-delete by setting status to Inactive (preserve referential integrity)
   const s = await db.student.update({ where: { id }, data: { status: 'Inactive' } })
   return NextResponse.json({ ok: true, id: s.id, status: s.status })

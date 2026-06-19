@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { createHmac } from 'crypto'
 import { NextResponse } from 'next/server'
 import { db } from './db'
-import { canUser, setRoleOverridesCache } from './rbac'
+import { canUser, setRoleOverridesCache, supportsPerUserOverrides, supportsPerUserDataScope, getRoleOverrides } from './rbac'
 import type { AuthUser, Role, ModuleId, Action, UserOverrides, ModuleOverride, DataScope, RoleOverrides, RoleOverride } from './rbac'
 
 const SECRET = process.env.AUTH_SECRET || 'vidyamatrix-dev-secret-9f3k2j'
@@ -95,12 +95,19 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   const decoded = verifyToken(token)
   if (!decoded) return null
 
+  const userRole = await db.user.findUnique({ where: { id: decoded.uid }, select: { role: true } })
+  if (!userRole) return null
+
+  // Per-user overrides: full overrides for admin/teacher/transport_manager
+  // Data-scope-only overrides for student/parent (no module/action toggles)
+  const shouldLoadPerUser = supportsPerUserOverrides(userRole.role as Role) || supportsPerUserDataScope(userRole.role as Role)
+
   const user = await db.user.findUnique({
     where: { id: decoded.uid },
     include: {
       teacherClasses: { select: { classId: true } },
       parentLinks: { select: { studentId: true } },
-      permissions: true,
+      ...(shouldLoadPerUser ? { permissions: true } : {}),
     },
   })
   if (!user || !user.active) return null
@@ -114,7 +121,9 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     studentId: user.studentId,
     teacherClassIds: user.teacherClasses.map((t) => t.classId),
     childrenStudentIds: user.parentLinks.map((p) => p.studentId),
-    overrides: parseOverrides(user.permissions),
+    overrides: shouldLoadPerUser ? parseOverrides((user as any).permissions || []) : {},
+    // Include role-level overrides so the client-side sidebar reflects them
+    roleOverrides: (getRoleOverrides(user.role) as any) || {},
   }
 }
 

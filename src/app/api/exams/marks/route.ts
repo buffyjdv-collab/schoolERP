@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
-import { can } from '@/lib/rbac'
+import { canUser } from "@/lib/rbac"
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!can(user.role, 'exams', 'view')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!canUser(user, 'exams', 'view')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const examId = searchParams.get('examId')!

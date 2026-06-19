@@ -687,3 +687,22 @@ Stage Summary:
 - Both levels support: module enable/disable, CRUD action toggles, data scope (all/own/children/assigned_classes/none).
 - Super Admin role is always locked (cannot be restricted).
 - ESLint: 0 errors. Agent-browser verified role restriction + reset cycle.
+
+---
+Task ID: FIX-ROLES
+Agent: main
+Task: Fix teacher, parent, transport_manager roles not working
+
+Work Log:
+- ROOT CAUSE: 9 corrupted references in rbac.ts where `[module]` was mangled into `odule]` (e.g., `PERMISSIONS.super_adminodule]` instead of `PERMISSIONS.super_admin[module]`). This caused `roleEffectiveActions()` to always return `[]` for all non-super_admin roles, making every API return 403.
+- Also found 1 corruption in auth.ts: `cache[r.role]od]` instead of `cache[r.role][mod]` in `loadRoleOverridesOnce()`, which prevented role-level overrides from being cached.
+- Fixed all 10 corrupted references using binary replacement.
+- Updated `effectiveActions()` and `effectiveDataScope()` with role-supreme precedence: role DB override checked first (supreme), per-user override only if role has no override, then static PERMISSIONS.
+- Updated `isStaff()` to include `transport_manager`.
+- Cleaned up 5 stale rolePermission rows and 32 stale userPermission rows from previous testing that were blocking teacher/parent access.
+- Verified: Teacher (students✅ attendance✅ fees✅ transport✅ library✅ assets✅ exams✅ academics✅ hr403✅), Parent (students✅ attendance✅ fees✅ transport✅ library✅ exams✅ hr403✅ assets403✅), Transport Manager (transport✅ drivers✅ routes✅ students✅ attendance403✅ fees403✅ hr403✅ assets403✅ exams403✅). All sidebars show correct modules.
+
+Stage Summary:
+- All 5 roles now work correctly: super_admin (full), admin (full), transport_manager (transport+students+communication), teacher (academic modules), parent (children's modules).
+- The root cause was corrupted syntax in rbac.ts that broke the permission resolution for all non-super_admin roles.
+- ESLint: 0 errors. All API tests pass. Browser sidebars verified for all 3 roles.

@@ -110,6 +110,7 @@ export const api = {
     createStop: (data: any) => jfetch<any>('/api/transport/stops', { method: 'POST', body: JSON.stringify(data) }),
     updateStop: (id: string, data: any) => jfetch<any>(`/api/transport/stops/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteStop: (id: string) => jfetch<any>(`/api/transport/stops/${id}`, { method: 'DELETE' }),
+    myInfo: () => jfetch<any>('/api/transport/my-info'),
   },
   library: {
     createBook: (data: any) => jfetch<any>('/api/library/books', { method: 'POST', body: JSON.stringify(data) }),

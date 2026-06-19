@@ -2,7 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { useCan } from '@/lib/store'
+import { useCan, useStore } from '@/lib/store'
 import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
 import type { Vehicle } from '@/lib/types'
 import {
@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -91,6 +92,9 @@ interface RouteInfo {
 // ============ Main module ============
 
 export function TransportModule() {
+  const { user } = useStore()
+  const isStudentOrParent = user?.role === 'student' || user?.role === 'parent'
+
   // Live GPS state — hoisted so the socket stays connected across tab switches.
   const [liveVehicles, setLiveVehicles] = useState<LiveVehicle[]>([])
   const [connected, setConnected] = useState(false)
@@ -118,6 +122,11 @@ export function TransportModule() {
     })
     return () => { socket.disconnect() }
   }, [])
+
+  // For student/parent: show only their own transport info
+  if (isStudentOrParent) {
+    return <MyTransportTab liveVehicles={liveVehicles} connected={connected} />
+  }
 
   return (
     <div className="space-y-5">
@@ -1698,6 +1707,192 @@ function LiveMap({ vehicles, stops, selectedId, onSelect }: {
       <div className="absolute bottom-3 left-3 bg-black/50 backdrop-blur rounded-lg px-2 py-1 text-white/70 text-[10px] tabular-nums">
         {new Date().toLocaleTimeString('en-IN')} · tick {tick}
       </div>
+    </div>
+  )
+}
+
+
+// ============ My Transport Tab (student/parent only) ============
+
+function MyTransportTab({ liveVehicles, connected }: { liveVehicles: LiveVehicle[]; connected: boolean }) {
+  const { user } = useStore()
+  const { data, isLoading } = useQuery({ queryKey: ['my-transport'], queryFn: api.transport.myInfo })
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    )
+  }
+
+  const routes = data?.routes || []
+  const students = data?.students || []
+
+  if (!routes.length) {
+    return (
+      <div className="space-y-5">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-600 text-white p-5">
+          <div className="absolute inset-0 bg-grid opacity-20" />
+          <div className="relative flex items-center gap-3">
+            <Bus className="size-7" />
+            <div>
+              <h2 className="text-lg font-bold">My Transport</h2>
+              <p className="text-sm opacity-90">Your assigned bus route and live tracking information.</p>
+            </div>
+          </div>
+        </div>
+        <Card><CardContent className="p-8 text-center">
+          <Bus className="size-12 text-muted-foreground/30 mx-auto mb-3" />
+          <p className="text-sm font-medium">No transport route assigned</p>
+          <p className="text-xs text-muted-foreground mt-1">You have not been assigned to any bus route. Please contact the school office.</p>
+        </CardContent></Card>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Banner */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-sky-500 to-cyan-600 text-white p-5">
+        <div className="absolute inset-0 bg-grid opacity-20" />
+        <div className="relative flex items-center gap-3">
+          <Bus className="size-7" />
+          <div>
+            <h2 className="text-lg font-bold">My Transport</h2>
+            <p className="text-sm opacity-90">
+              {user?.role === 'parent'
+                ? `Transport info for ${students.length} ${students.length === 1 ? 'child' : 'children'}`
+                : 'Your assigned bus route and live tracking'}
+            </p>
+          </div>
+          <div className="ml-auto text-right">
+            <div className="text-xs opacity-90">GPS Status</div>
+            <div className="text-sm font-semibold flex items-center gap-1.5 justify-end">
+              <span className={`size-2 rounded-full ${connected ? 'bg-emerald-300 animate-pulse' : 'bg-amber-300'}`} />
+              {connected ? 'Live' : 'Connecting...'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Route cards */}
+      {routes.map((route: any, idx: number) => {
+        const assignedStudents = students.filter((s: any) => s.routeId === route.id || s.routeName === route.name)
+        const liveBus = route.vehicles.find((v: any) => v.status === 'Moving')
+        const liveData = liveVehicles.find((lv: any) => route.vehicles.some((v: any) => v.vehicleNo === lv.vehicleNo))
+
+        return (
+          <Card key={route.id} className="overflow-hidden">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <div className="size-8 rounded-lg bg-sky-500/15 grid place-items-center text-sky-600">
+                  <RouteIcon className="size-4" />
+                </div>
+                {route.name}
+                {route.status === 'Active' && <Badge className="bg-emerald-500/15 text-emerald-700 text-[10px]">Active</Badge>}
+              </CardTitle>
+              {route.description && <p className="text-xs text-muted-foreground">{route.description}</p>}
+            </CardHeader>
+            <CardContent className="space-y-4">
+
+              {/* Assigned students */}
+              {assignedStudents.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {assignedStudents.map((s: any) => (
+                    <div key={s.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50 text-xs">
+                      <Avatar className="size-6"><AvatarFallback className="text-[10px] bg-sky-500/15 text-sky-700">{s.name.split(' ').map((n: string) => n[0]).slice(0, 2).join('')}</AvatarFallback></Avatar>
+                      <span className="font-medium">{s.name}</span>
+                      <span className="text-muted-foreground">{s.className}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Bus info */}
+              {route.vehicles.map((v: any) => (
+                <div key={v.id} className="flex items-center gap-3 p-3 rounded-lg border">
+                  <div className="size-10 rounded-xl bg-sky-500/15 grid place-items-center text-sky-600">
+                    <Bus className="size-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">{v.vehicleNo}</div>
+                    <div className="text-xs text-muted-foreground flex items-center gap-3">
+                      <span className="flex items-center gap-0.5"><Phone className="size-2.5" />{v.driverName || '—'}</span>
+                      <span className="flex items-center gap-0.5"><Gauge className="size-2.5" />{(liveData?.speed ?? v.speed ?? 0)} km/h</span>
+                    </div>
+                  </div>
+                  <StatusBadge status={liveData?.status || v.status} />
+                </div>
+              ))}
+
+              {/* Live tracking mini-map */}
+              {route.vehicles.some((v: any) => v.currentLat && v.currentLng) && (
+                <div className="relative rounded-lg overflow-hidden border" style={{ aspectRatio: '3/1' }}>
+                  <svg viewBox="0 0 600 200" className="absolute inset-0 w-full h-full">
+                    <rect width="600" height="200" fill="#0c4a6e" />
+                    <path d="M 40 40 Q 200 80 320 120 T 560 180" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="3" />
+                    {route.stops.map((stop: any, i: number) => {
+                      const x = 40 + (i / Math.max(route.stops.length - 1, 1)) * 520
+                      const y = 40 + (i / Math.max(route.stops.length - 1, 1)) * 140
+                      return <circle key={stop.id} cx={x} cy={y} r="4" fill="#fbbf24" stroke="#fff" strokeWidth="1" />
+                    })}
+                    {route.vehicles.filter((v: any) => v.currentLat && v.currentLng).map((v: any) => {
+                      const lv = liveVehicles.find((l: any) => l.vehicleNo === v.vehicleNo)
+                      const lat = lv?.lat || v.currentLat
+                      const lng = lv?.lng || v.currentLng
+                      const x = 40 + ((lng - 77.5) / 0.25) * 520
+                      const y = 40 + ((13.25 - lat) / 0.37) * 140
+                      return (
+                        <g key={v.id}>
+                          {v.status === 'Moving' && <circle cx={x} cy={y} r="18" fill="#10b981" opacity="0.2" className="animate-ping" />}
+                          <circle cx={x} cy={y} r="8" fill="#10b981" stroke="#fff" strokeWidth="2" />
+                          <text x={x} y={y + 1} fill="#fff" fontSize="7" textAnchor="middle" fontWeight="700">{idx + 1}</text>
+                        </g>
+                      )
+                    })}
+                  </svg>
+                  <div className="absolute top-2 left-2 bg-black/50 rounded px-2 py-1 text-white text-[10px]">
+                    {route.name} · Live
+                  </div>
+                </div>
+              )}
+
+              {/* Stops list */}
+              {route.stops.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1"><MapPin className="size-3" /> Route Stops ({route.stops.length})</h4>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto scroll-thin">
+                    {route.stops.map((stop: any) => (
+                      <div key={stop.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30 text-xs">
+                        <div className="size-2 rounded-full bg-amber-400 shrink-0" />
+                        <span className="font-medium flex-1">{stop.name}</span>
+                        <span className="text-muted-foreground">Pickup: {stop.pickupTime}</span>
+                        <span className="text-muted-foreground">Drop: {stop.dropTime}</span>
+                        {stop.fare > 0 && <Badge variant="outline" className="text-[9px]">₹{stop.fare}</Badge>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Driver info */}
+              {route.vehicles[0]?.driverName && (
+                <div className="flex items-center gap-3 p-2 rounded-lg bg-muted/30 text-xs">
+                  <div className="size-7 rounded-full bg-sky-500/15 grid place-items-center text-sky-600">
+                    <Users className="size-3.5" />
+                  </div>
+                  <div>
+                    <span className="font-medium">{route.vehicles[0].driverName}</span>
+                    {route.vehicles[0].driverPhone && <span className="text-muted-foreground ml-2">{route.vehicles[0].driverPhone}</span>}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )
+      })}
     </div>
   )
 }

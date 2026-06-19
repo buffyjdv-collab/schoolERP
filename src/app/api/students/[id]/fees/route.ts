@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
-import { can } from '@/lib/rbac'
+import { canUser } from "@/lib/rbac"
 
 async function canAccessStudent(studentId: string) {
   const user = await getCurrentUser()
   if (!user) return { ok: false as const, res: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
-  if (!can(user.role, 'fees', 'view')) return { ok: false as const, res: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+  if (!canUser(user, 'fees', 'view')) return { ok: false as const, res: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   if (user.role === 'super_admin' || user.role === 'admin') return { ok: true as const }
   if (user.role === 'student' && studentId === user.studentId) return { ok: true as const }
   if (user.role === 'parent' && user.childrenStudentIds.includes(studentId)) return { ok: true as const }

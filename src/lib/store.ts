@@ -14,6 +14,7 @@ export interface AuthUser {
   teacherClassIds: string[]
   childrenStudentIds: string[]
   overrides?: UserOverrides  // per-user permission overrides (super admin control)
+  roleOverrides?: any  // role-level DB overrides (sent from server for client sidebar)
 }
 
 interface AppState {

@@ -11,6 +11,7 @@ import type { Role, ModuleId, Action, DataScope } from '@/lib/rbac'
 import {
   ShieldCheck, Users, Search, ChevronRight, Lock, Unlock, RotateCcw, Save,
   UserCircle, Mail, Calendar, Power, AlertTriangle, Check, X, Info, UsersRound,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -500,6 +501,9 @@ function PermissionEditor({ userId, onClose }: { userId: string; onClose: () => 
   }
 
   const isSuperAdmin = user.role === 'super_admin'
+  // For student/parent: only dataScope overrides are available (no module toggle, no action chips)
+  const isDataScopeOnly = user.role === 'student' || user.role === 'parent'
+  const isPerUserLocked = isSuperAdmin
 
   const updateOverride = (module: string, field: string, value: any) => {
     setOverrides(prev => {
@@ -557,6 +561,15 @@ function PermissionEditor({ userId, onClose }: { userId: string; onClose: () => 
             </p>
           </div>
         )}
+        {isDataScopeOnly && (
+          <div className="mt-3 p-2.5 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-start gap-2">
+            <SlidersHorizontal className="size-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+            <div className="text-xs text-sky-700 dark:text-sky-400">
+              <p className="font-medium">Data Scope Configuration for {ROLE_LABELS[user.role as Role]}</p>
+              <p className="mt-0.5">Module access and CRUD actions are controlled by the role. Here you can customize <strong>which data</strong> this user can see within each module (e.g., restrict a parent to see only specific children's records, or set a student to see only their own data).</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Permission matrix */}
@@ -565,9 +578,9 @@ function PermissionEditor({ userId, onClose }: { userId: string; onClose: () => 
           <div className="flex items-center justify-between">
             <div>
               <h4 className="text-sm font-semibold">Module Permission Matrix</h4>
-              <p className="text-[11px] text-muted-foreground">Toggle modules, customize CRUD actions, and set data scope per module.</p>
+              <p className="text-[11px] text-muted-foreground">{isDataScopeOnly ? 'Set data scope per module — controls which records this user can see.' : 'Toggle modules, customize CRUD actions, and set data scope per module.'}</p>
             </div>
-            {!isSuperAdmin && (
+            {!isPerUserLocked && (
               <div className="flex gap-1.5">
                 <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => resetMut.mutate()} disabled={resetMut.isPending}>
                   <RotateCcw className="size-3" /> Reset
@@ -582,20 +595,22 @@ function PermissionEditor({ userId, onClose }: { userId: string; onClose: () => 
           {ALL_MODULES.filter(m => m !== 'user-management' || user.role === 'super_admin').map(module => {
             const ov = overrides[module] || {}
             const roleActions = roleDefaults[module] || []
-            const effectiveActions = getEffective(module)
+            const effActions = getEffective(module)
             const moduleEnabled = ov.enabled !== false && roleActions.length > 0
             const isCustom = hasOverride(module)
             const relevantActions = MODULE_ACTIONS[module] || ['view']
+            // For student/parent: skip modules they don't have in their role (only show modules with role-level access)
+            if (isDataScopeOnly && roleActions.length === 0) return null
 
             return (
-              <div key={module} className={`rounded-lg border ${isCustom ? 'border-amber-500/40 bg-amber-500/5' : 'border-border'}`}>
+              <div key={module} className={`rounded-lg border ${isCustom ? 'border-amber-500/40 bg-amber-500/5' : 'border-border'} ${isDataScopeOnly ? 'border-sky-500/20' : ''}`}>
                 <div className="flex items-center gap-3 p-3">
-                  {/* Module enable/disable switch */}
-                  {!isSuperAdmin && (
+                  {/* Module enable/disable switch — hidden for student/parent (role controls module access) */}
+                  {!isSuperAdmin && !isDataScopeOnly && (
                     <Switch
                       checked={moduleEnabled}
                       onCheckedChange={(v) => updateOverride(module, 'enabled', v)}
-                      disabled={isSuperAdmin}
+                      disabled={isPerUserLocked}
                     />
                   )}
                   <div className="flex-1 min-w-0">
@@ -603,16 +618,17 @@ function PermissionEditor({ userId, onClose }: { userId: string; onClose: () => 
                       <span className="text-sm font-medium">{MODULE_LABELS[module]}</span>
                       {isCustom && <Badge className="text-[9px] h-4 bg-amber-500/15 text-amber-700">Custom</Badge>}
                       {!moduleEnabled && <Badge variant="destructive" className="text-[9px] h-4">Disabled</Badge>}
+                      {isDataScopeOnly && <Badge className="text-[9px] h-4 bg-sky-500/15 text-sky-700 dark:text-sky-300">Data Scope</Badge>}
                     </div>
                     <p className="text-[11px] text-muted-foreground truncate">{MODULE_DESCRIPTIONS[module]}</p>
                   </div>
-                  {/* Data scope selector */}
+                  {/* Data scope selector — available for all non-super-admin roles with module access */}
                   {!isSuperAdmin && moduleEnabled && (user.role === 'teacher' || user.role === 'student' || user.role === 'parent' || user.role === 'transport_manager') && (
                     <Select
                       value={ov.dataScope || (user.role === 'student' ? 'own' : user.role === 'parent' ? 'children' : user.role === 'teacher' ? 'assigned_classes' : 'all')}
                       onValueChange={(v) => updateOverride(module, 'dataScope', v)}
                     >
-                      <SelectTrigger className="w-36 h-7 text-[11px]"><Lock className="size-2.5 mr-1" /><SelectValue /></SelectTrigger>
+                      <SelectTrigger className="w-36 h-7 text-[11px]"><SlidersHorizontal className="size-2.5 mr-1" /><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {Object.entries(SCOPE_LABELS).map(([k, v]) => (
                           <SelectItem key={k} value={k} className="text-xs">{v}</SelectItem>
@@ -622,18 +638,18 @@ function PermissionEditor({ userId, onClose }: { userId: string; onClose: () => 
                   )}
                 </div>
 
-                {/* Action toggles */}
-                {moduleEnabled && (
+                {/* Action toggles — hidden for student/parent (role controls actions) */}
+                {moduleEnabled && !isDataScopeOnly && (
                   <div className="px-3 pb-3 flex flex-wrap gap-1.5">
                     {relevantActions.map(action => {
-                      const checked = effectiveActions.includes(action)
+                      const checked = effActions.includes(action)
                       const roleHas = roleActions.includes(action)
                       const isOverridden = ov.actions !== undefined && ov.actions !== null
                       return (
                         <button
                           key={action}
                           onClick={() => {
-                            if (isSuperAdmin) return
+                            if (isPerUserLocked) return
                             const cur = ov.actions !== undefined && ov.actions !== null ? [...ov.actions] : [...roleActions]
                             const idx = cur.indexOf(action)
                             if (idx >= 0) cur.splice(idx, 1)
@@ -642,14 +658,14 @@ function PermissionEditor({ userId, onClose }: { userId: string; onClose: () => 
                             if (cur.length > 0 && !cur.includes('view')) cur.push('view')
                             updateOverride(module, 'actions', cur)
                           }}
-                          disabled={isSuperAdmin}
+                          disabled={isPerUserLocked}
                           className={`px-2 py-1 rounded-md text-[10px] font-medium border transition-colors ${
                             checked
                               ? isOverridden
                                 ? 'bg-amber-500/15 text-amber-700 border-amber-500/40'
                                 : 'bg-primary/10 text-primary border-primary/20'
                               : 'bg-muted text-muted-foreground border-border'
-                          } ${isSuperAdmin ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-primary/40'}`}
+                          } ${isPerUserLocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-primary/40'}`}
                           title={roleHas ? 'In role default' : 'Custom'}
                         >
                           {ACTION_LABELS[action]}

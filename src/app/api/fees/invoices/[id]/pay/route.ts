@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getCurrentUser } from '@/lib/auth'
-import { can } from '@/lib/rbac'
+import { canUser } from "@/lib/rbac"
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -12,8 +12,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!inv) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   // Permission: admin/super_admin can collect; student can pay own; parent can pay children's
-  const mayCollect = can(user.role, 'fees', 'collect')
-  const mayPay = can(user.role, 'fees', 'pay')
+  const mayCollect = canUser(user, 'fees', 'collect')
+  const mayPay = canUser(user, 'fees', 'pay')
   const ownsInvoice = (user.role === 'student' && inv.studentId === user.studentId)
     || (user.role === 'parent' && user.childrenStudentIds.includes(inv.studentId))
   if (!mayCollect && !(mayPay && ownsInvoice)) {

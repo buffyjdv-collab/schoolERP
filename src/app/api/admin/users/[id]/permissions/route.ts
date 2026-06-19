@@ -49,6 +49,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const targetUser = await db.user.findUnique({ where: { id } })
   if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
   if (targetUser.role === 'super_admin') return NextResponse.json({ error: 'Cannot restrict a super admin' }, { status: 400 })
+  // For student/parent: only dataScope overrides are allowed (no action/enabled/module-toggle)
+  const isDataScopeOnly = targetUser.role === 'student' || targetUser.role === 'parent'
 
   // Delete existing overrides, then recreate
   await db.userPermission.deleteMany({ where: { userId: id } })
@@ -59,9 +61,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   for (const [module, ov] of Object.entries(body.overrides || {})) {
     const mod = module as ModuleId
     const o = ov as any
-    // Skip if all fields are null (inherit default) — no need to store
-    const hasActions = o.actions !== undefined && o.actions !== null
     const hasScope = o.dataScope !== undefined && o.dataScope !== null
+    // For student/parent: ONLY save dataScope (ignore actions/enabled)
+    if (isDataScopeOnly) {
+      if (!hasScope) continue
+      if (!validScopes.includes(o.dataScope)) continue
+      await db.userPermission.create({
+        data: { userId: id, module: mod, actions: null, dataScope: o.dataScope, enabled: null },
+      })
+      continue
+    }
+    // For admin/teacher/transport_manager: full overrides (actions + dataScope + enabled)
+    const hasActions = o.actions !== undefined && o.actions !== null
     const hasEnabled = o.enabled !== undefined && o.enabled !== null
     if (!hasActions && !hasScope && !hasEnabled) continue
 

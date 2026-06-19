@@ -1,5 +1,8 @@
 // RBAC Engine — single source of truth for role-based permissions.
 // Isomorphic (used on both server and client).
+// Supports 3 layers: (1) hardcoded role defaults → (2) DB role overrides → (3) DB per-user overrides.
+// Per-user overrides (layer 3) are ONLY available for admin, transport_manager, and teacher roles.
+// Student and Parent roles use role-level permissions ONLY (no per-user customization).
 
 export type Role = 'super_admin' | 'admin' | 'transport_manager' | 'teacher' | 'student' | 'parent'
 
@@ -12,6 +15,8 @@ export type Action =
   | 'view' | 'create' | 'edit' | 'delete' | 'approve'
   | 'export' | 'collect' | 'mark' | 'enter' | 'send'
   | 'issue' | 'return' | 'pay' | 'run'
+
+export type DataScope = 'all' | 'own' | 'children' | 'assigned_classes' | 'none'
 
 export const ALL_MODULES: ModuleId[] = [
   'dashboard', 'ai-assistant', 'admissions', 'students', 'academics', 'attendance',
@@ -29,115 +34,13 @@ export const ROLE_LABELS: Record<Role, string> = {
 }
 
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
-  super_admin: 'Full system access including user management',
+  super_admin: 'Full system access including user & role management',
   admin: 'Full operational access to all school modules',
-  transport_manager: 'Manage buses, routes, drivers, stops & student transport assignments',
+  transport_manager: 'Manage buses, routes, drivers, stops & student transport',
   teacher: 'Class teacher — academic operations for assigned classes',
   student: 'Student — view own academic, attendance & fee records',
   parent: 'Parent — monitor children\'s progress, attendance & fees',
 }
-
-// Permission matrix: role → module → allowed actions
-// 'view' is implied if any action is present.
-const A = (actions: Action[]) => actions
-
-export const PERMISSIONS: Record<Role, Partial<Record<ModuleId, Action[]>>> = {
-  super_admin: {
-    dashboard: A(['view','export']), 'ai-assistant': A(['view']),
-    admissions: A(['view','create','edit','delete','approve']),
-    students: A(['view','create','edit','delete','export']),
-    academics: A(['view','create','edit','delete']),
-    attendance: A(['view','mark','export']),
-    exams: A(['view','enter','edit','delete','export']),
-    timetable: A(['view','create','edit','delete','export']),
-    fees: A(['view','create','edit','collect','export']),
-    hr: A(['view','create','edit','approve','run','export']),
-    transport: A(['view','create','edit','export']),
-    library: A(['view','create','edit','issue','return','export']),
-    assets: A(['view','create','edit','delete','export']),
-    communication: A(['view','send','export']),
-    'user-management': A(['view','create','edit','delete']),
-  },
-  admin: {
-    dashboard: A(['view','export']), 'ai-assistant': A(['view']),
-    admissions: A(['view','create','edit','delete','approve']),
-    students: A(['view','create','edit','delete','export']),
-    academics: A(['view','create','edit','delete']),
-    attendance: A(['view','mark','export']),
-    exams: A(['view','enter','edit','delete','export']),
-    timetable: A(['view','create','edit','delete','export']),
-    fees: A(['view','create','edit','delete','collect','export']),
-    hr: A(['view','create','edit','delete','approve','run','export']),
-    transport: A(['view','create','edit','delete','export']),
-    library: A(['view','create','edit','delete','issue','return','export']),
-    assets: A(['view','create','edit','delete','export']),
-    communication: A(['view','send','delete','export']),
-  },
-  transport_manager: {
-    dashboard: A(['view']), 'ai-assistant': A(['view']),
-    students: A(['view','edit']),               // view all + assign routes
-    transport: A(['view','create','edit','delete','export']),  // full transport CRUD
-    communication: A(['view','send']),          // notify parents about transport
-  },
-  teacher: {
-    dashboard: A(['view']), 'ai-assistant': A(['view']),
-    admissions: A(['view']),
-    students: A(['view','edit']),           // view own-class students, edit attendance-related
-    academics: A(['view']),
-    attendance: A(['view','mark']),         // mark for own classes
-    exams: A(['view','enter']),             // enter marks for own classes
-    timetable: A(['view']),
-    fees: A(['view']),                      // view class fee status (no collect)
-    transport: A(['view']),
-    library: A(['view','issue','return']),
-    assets: A(['view']),
-    communication: A(['view','send']),      // message own class
-  },
-  student: {
-    dashboard: A(['view']), 'ai-assistant': A(['view']),
-    students: A(['view']),                  // own profile only
-    academics: A(['view']),
-    attendance: A(['view']),                // own attendance
-    exams: A(['view']),                     // own results
-    timetable: A(['view']),                 // own timetable
-    fees: A(['view','pay']),                // own fees, can pay
-    transport: A(['view']),                 // own route
-    library: A(['view']),                   // own issued books
-    communication: A(['view']),
-  },
-  parent: {
-    dashboard: A(['view']), 'ai-assistant': A(['view']),
-    students: A(['view']),                  // children profiles
-    academics: A(['view']),
-    attendance: A(['view']),                // children attendance
-    exams: A(['view']),                     // children results
-    timetable: A(['view']),
-    fees: A(['view','pay']),                // children fees, can pay
-    transport: A(['view']),                 // children routes
-    library: A(['view']),
-    communication: A(['view']),
-  },
-}
-
-/** Check if a role can perform an action on a module. */
-export function can(role: Role, module: ModuleId, action: Action = 'view'): boolean {
-  const actions = PERMISSIONS[role]?.[module]
-  return !!actions && actions.includes(action)
-}
-
-/** Modules a role can view (for sidebar filtering). */
-export function accessibleModules(role: Role): ModuleId[] {
-  return ALL_MODULES.filter((m) => can(role, m, 'view'))
-}
-
-/** Highest-privilege indicator for a module (for showing action buttons). */
-export function actionsFor(role: Role, module: ModuleId): Action[] {
-  return PERMISSIONS[role]?.[module] ?? []
-}
-
-// ============ DATA SCOPING ============
-
-export type DataScope = 'all' | 'own' | 'children' | 'assigned_classes' | 'none'
 
 export const SCOPE_LABELS: Record<DataScope, string> = {
   all: 'All Records',
@@ -146,128 +49,6 @@ export const SCOPE_LABELS: Record<DataScope, string> = {
   assigned_classes: 'Assigned Classes',
   none: 'No Access',
 }
-
-// ============ ROLE-LEVEL DB OVERRIDES (Super Admin role management) ============
-// Super Admin can customize the base permission matrix for an entire role via DB.
-// These overrides apply to ALL users with that role (unless individually overridden).
-// The cache is populated server-side at request time via loadRoleOverrides().
-
-export interface RoleOverride {
-  actions?: Action[] | null
-  dataScope?: DataScope | null
-  enabled?: boolean | null
-}
-
-export type RoleOverrides = Partial<Record<ModuleId, RoleOverride>>
-
-// In-memory cache of role overrides (keyed by role). Refreshed per request on server.
-let roleOverridesCache: Record<string, RoleOverrides> | null = null
-
-/** Set the role overrides cache (called server-side at request start). */
-export function setRoleOverridesCache(overrides: Record<string, RoleOverrides>) {
-  roleOverridesCache = overrides
-}
-
-/** Clear the cache. */
-export function clearRoleOverridesCache() {
-  roleOverridesCache = null
-}
-
-/** Get effective role-level actions for a module (DB override > static PERMISSIONS). */
-export function roleEffectiveActions(role: Role, module: ModuleId): Action[] {
-  if (role === 'super_admin') return PERMISSIONS.super_admin[module] ?? []
-  const dbOv = roleOverridesCache?.[role]?.[module]
-  if (dbOv?.enabled === false) return []
-  if (dbOv?.actions !== undefined && dbOv?.actions !== null) return dbOv.actions
-  return PERMISSIONS[role]?.[module] ?? []
-}
-
-/** Get effective role-level data scope for a module. */
-export function roleEffectiveDataScope(role: Role, module: ModuleId): DataScope {
-  if (role === 'super_admin' || role === 'admin') return 'all'
-  const dbOv = roleOverridesCache?.[role]?.[module]
-  if (dbOv?.dataScope) return dbOv.dataScope
-  if (role === 'student') return 'own'
-  if (role === 'parent') return 'children'
-  if (role === 'teacher') return 'assigned_classes'
-  return 'none'
-}
-
-/** Per-module override for a specific user. null fields = inherit role default. */
-export interface ModuleOverride {
-  actions?: Action[] | null      // null = inherit role; [] = no actions; [...] = custom set
-  dataScope?: DataScope | null   // null = inherit role
-  enabled?: boolean | null       // null = inherit role; true = force on; false = force off
-}
-
-export type UserOverrides = Partial<Record<ModuleId, ModuleOverride>>
-
-export interface AuthUser {
-  id: string
-  email: string
-  name: string
-  role: Role
-  employeeId?: string | null
-  studentId?: string | null
-  teacherClassIds: string[]
-  childrenStudentIds: string[]
-  overrides?: UserOverrides  // per-user customizations set by super admin
-}
-
-/** Whether the user sees all records or a scoped subset. */
-export function isStaff(role: Role): boolean {
-  return role === 'super_admin' || role === 'admin' || role === 'teacher'
-}
-
-/** Effective actions for a user on a module (user override > role DB override > static PERMISSIONS). */
-export function effectiveActions(user: AuthUser, module: ModuleId): Action[] {
-  // Super admin always full access (can't be restricted)
-  if (user.role === 'super_admin') return PERMISSIONS.super_admin[module] ?? []
-  const ov = user.overrides?.[module]
-  // User-level force-disable
-  if (ov?.enabled === false) return []
-  // User-level custom actions override
-  if (ov?.actions !== undefined && ov.actions !== null) return ov.actions
-  // Fall back to role-level DB override (or static PERMISSIONS)
-  return roleEffectiveActions(user.role, module)
-}
-
-/** Check if a USER (with overrides) can perform an action on a module. */
-export function canUser(user: AuthUser, module: ModuleId, action: Action = 'view'): boolean {
-  return effectiveActions(user, module).includes(action)
-}
-
-/** Modules a USER can view (considers overrides). */
-export function accessibleModulesForUser(user: AuthUser): ModuleId[] {
-  return ALL_MODULES.filter((m) => canUser(user, m, 'view'))
-}
-
-/** Effective data scope for a user on a module (user override > role DB override > static). */
-export function effectiveDataScope(user: AuthUser, module: ModuleId): DataScope {
-  if (user.role === 'super_admin' || user.role === 'admin') return 'all'
-  const ov = user.overrides?.[module]
-  if (ov?.dataScope) return ov.dataScope
-  return roleEffectiveDataScope(user.role, module)
-}
-
-/** Student IDs a user is allowed to see. Returns 'all' for admin/super_admin. */
-export function visibleStudentIds(user: AuthUser): string[] | 'all' {
-  const scope = effectiveDataScope(user, 'students')
-  if (scope === 'all') return 'all'
-  if (scope === 'own') return user.studentId ? [user.studentId] : []
-  if (scope === 'children') return user.childrenStudentIds
-  if (scope === 'assigned_classes') return 'all' // teacher filtering applied separately
-  return []
-}
-
-/** Class IDs a teacher can access (empty = all for admin). */
-export function visibleClassIds(user: AuthUser): string[] | 'all' {
-  if (user.role === 'super_admin' || user.role === 'admin') return 'all'
-  if (user.role === 'teacher') return user.teacherClassIds
-  return 'all'
-}
-
-// ============ MODULE METADATA (for permission matrix UI) ============
 
 export const MODULE_LABELS: Record<ModuleId, string> = {
   dashboard: 'Dashboard & MIS',
@@ -305,30 +86,6 @@ export const MODULE_DESCRIPTIONS: Record<ModuleId, string> = {
   'user-management': 'User accounts, role assignment and permission control',
 }
 
-/** All actions that can be toggled per module. */
-export const ALL_ACTIONS: Action[] = [
-  'view', 'create', 'edit', 'delete', 'approve', 'export',
-  'collect', 'mark', 'enter', 'send', 'issue', 'return', 'pay', 'run',
-]
-
-export const ACTION_LABELS: Record<Action, string> = {
-  view: 'View',
-  create: 'Create',
-  edit: 'Edit',
-  delete: 'Delete',
-  approve: 'Approve',
-  export: 'Export',
-  collect: 'Collect',
-  mark: 'Mark',
-  enter: 'Enter',
-  send: 'Send',
-  issue: 'Issue',
-  return: 'Return',
-  pay: 'Pay',
-  run: 'Run',
-}
-
-/** Actions relevant to each module (for the permission matrix). */
 export const MODULE_ACTIONS: Record<ModuleId, Action[]> = {
   dashboard: ['view', 'export'],
   'ai-assistant': ['view'],
@@ -345,4 +102,251 @@ export const MODULE_ACTIONS: Record<ModuleId, Action[]> = {
   assets: ['view', 'create', 'edit', 'delete', 'export'],
   communication: ['view', 'send', 'delete', 'export'],
   'user-management': ['view', 'create', 'edit', 'delete'],
+}
+
+export const ACTION_LABELS: Record<Action, string> = {
+  view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete', approve: 'Approve',
+  export: 'Export', collect: 'Collect', mark: 'Mark', enter: 'Enter', send: 'Send',
+  issue: 'Issue', return: 'Return', pay: 'Pay', run: 'Run',
+}
+
+// ============ HARDCODED ROLE DEFAULTS (layer 1) ============
+
+const A = (actions: Action[]) => actions
+
+export const PERMISSIONS: Record<Role, Partial<Record<ModuleId, Action[]>>> = {
+  super_admin: {
+    dashboard: A(['view','export']), 'ai-assistant': A(['view']),
+    admissions: A(['view','create','edit','delete','approve']),
+    students: A(['view','create','edit','delete','export']),
+    academics: A(['view','create','edit','delete']),
+    attendance: A(['view','mark','export']),
+    exams: A(['view','enter','edit','delete','export']),
+    timetable: A(['view','create','edit','delete','export']),
+    fees: A(['view','create','edit','delete','collect','export']),
+    hr: A(['view','create','edit','delete','approve','run','export']),
+    transport: A(['view','create','edit','delete','export']),
+    library: A(['view','create','edit','delete','issue','return','export']),
+    assets: A(['view','create','edit','delete','export']),
+    communication: A(['view','send','delete','export']),
+    'user-management': A(['view','create','edit','delete']),
+  },
+  admin: {
+    dashboard: A(['view','export']), 'ai-assistant': A(['view']),
+    admissions: A(['view','create','edit','delete','approve']),
+    students: A(['view','create','edit','delete','export']),
+    academics: A(['view','create','edit','delete']),
+    attendance: A(['view','mark','export']),
+    exams: A(['view','enter','edit','delete','export']),
+    timetable: A(['view','create','edit','delete','export']),
+    fees: A(['view','create','edit','delete','collect','export']),
+    hr: A(['view','create','edit','delete','approve','run','export']),
+    transport: A(['view','create','edit','delete','export']),
+    library: A(['view','create','edit','delete','issue','return','export']),
+    assets: A(['view','create','edit','delete','export']),
+    communication: A(['view','send','delete','export']),
+  },
+  transport_manager: {
+    dashboard: A(['view']), 'ai-assistant': A(['view']),
+    students: A(['view','edit']),
+    transport: A(['view','create','edit','delete','export']),
+    communication: A(['view','send']),
+  },
+  teacher: {
+    dashboard: A(['view']), 'ai-assistant': A(['view']),
+    admissions: A(['view']),
+    students: A(['view','edit']),
+    academics: A(['view']),
+    attendance: A(['view','mark']),
+    exams: A(['view','enter']),
+    timetable: A(['view']),
+    fees: A(['view']),
+    transport: A(['view']),
+    library: A(['view','issue','return']),
+    assets: A(['view']),
+    communication: A(['view','send']),
+  },
+  student: {
+    dashboard: A(['view']), 'ai-assistant': A(['view']),
+    students: A(['view']),
+    academics: A(['view']),
+    attendance: A(['view']),
+    exams: A(['view']),
+    timetable: A(['view']),
+    fees: A(['view','pay']),
+    transport: A(['view']),
+    library: A(['view']),
+    communication: A(['view']),
+  },
+  parent: {
+    dashboard: A(['view']), 'ai-assistant': A(['view']),
+    students: A(['view']),
+    academics: A(['view']),
+    attendance: A(['view']),
+    exams: A(['view']),
+    timetable: A(['view']),
+    fees: A(['view','pay']),
+    transport: A(['view']),
+    library: A(['view']),
+    communication: A(['view']),
+  },
+}
+
+// ============ OVERRIDE TYPES (layers 2 & 3) ============
+
+export interface ModuleOverride {
+  actions?: Action[] | null
+  dataScope?: DataScope | null
+  enabled?: boolean | null
+}
+
+export type UserOverrides = Partial<Record<ModuleId, ModuleOverride>>
+
+export interface AuthUser {
+  id: string
+  email: string
+  name: string
+  role: Role
+  employeeId?: string | null
+  studentId?: string | null
+  teacherClassIds: string[]
+  childrenStudentIds: string[]
+  overrides?: UserOverrides  // per-user customizations (only for admin/teacher/transport_manager)
+  roleOverrides?: RoleOverrides  // role-level DB overrides (sent to client for sidebar)
+}
+
+// ============ ROLE-LEVEL DB OVERRIDES (layer 2) ============
+
+export interface RoleOverride {
+  actions?: Action[] | null
+  dataScope?: DataScope | null
+  enabled?: boolean | null
+}
+
+export type RoleOverrides = Partial<Record<ModuleId, RoleOverride>>
+
+let roleOverridesCache: Record<string, RoleOverrides> | null = null
+
+export function setRoleOverridesCache(overrides: Record<string, RoleOverrides>) {
+  roleOverridesCache = overrides
+}
+
+export function clearRoleOverridesCache() {
+  roleOverridesCache = null
+}
+
+/** Get the role-level overrides for a specific role from the cache. */
+export function getRoleOverrides(role: string): RoleOverrides | undefined {
+  return roleOverridesCache?.[role]
+}
+
+/** Check if a role supports full per-user overrides (actions + enabled + dataScope). */
+export function supportsPerUserOverrides(role: Role): boolean {
+  return role === 'admin' || role === 'transport_manager' || role === 'teacher'
+}
+
+/** Check if a role supports per-user DATA SCOPE overrides only (no action/module toggle).
+ *  Student and Parent can have their data scope customized per-user, but NOT which modules they see or what CRUD actions they can do.
+ */
+export function supportsPerUserDataScope(role: Role): boolean {
+  return role === 'student' || role === 'parent'
+}
+
+// ============ DYNAMIC PERMISSION CHECKS (with overrides) ============
+
+/**
+ * Resolve effective actions for a user on a module.
+ *
+ * PRECEDENCE (role is supreme):
+ *   1. Role-level DB override (Layer 2) — SUPREME. If set, per-user overrides are IGNORED.
+ *   2. Per-user DB override (Layer 3) — ONLY for admin/teacher/transport_manager roles.
+ *      Student and Parent roles skip this layer entirely (role-only permissions).
+ *   3. Hardcoded role default (Layer 1) — fallback.
+ *
+ * Super admin is always unrestricted.
+ */
+export function effectiveActions(user: AuthUser, module: ModuleId): Action[] {
+  if (user.role === 'super_admin') return PERMISSIONS.super_admin[module] ?? []
+
+  // Layer 2: role-level DB override — SUPREME, checked first
+  // On server: use roleOverridesCache. On client: use user.roleOverrides (sent from server).
+  const roleDbOv = roleOverridesCache?.[user.role]?.[module] ?? user.roleOverrides?.[module]
+  if (roleDbOv !== undefined) {
+    if (roleDbOv.enabled === false) return []
+    if (roleDbOv.actions !== undefined && roleDbOv.actions !== null) return roleDbOv.actions
+  }
+
+  // Layer 3: per-user override — ONLY for roles that support it (NOT student/parent)
+  if (supportsPerUserOverrides(user.role)) {
+    const ov = user.overrides?.[module]
+    if (ov?.enabled === false) return []
+    if (ov?.actions !== undefined && ov.actions !== null) return ov.actions
+  }
+
+  // Layer 1: hardcoded default
+  return PERMISSIONS[user.role]?.[module] ?? []
+}
+
+/** Check if a USER (with overrides) can perform an action on a module. */
+export function canUser(user: AuthUser, module: ModuleId, action: Action = 'view'): boolean {
+  return effectiveActions(user, module).includes(action)
+}
+
+/** Modules a USER can view (considers all override layers — used by sidebar). */
+export function accessibleModulesForUser(user: AuthUser): ModuleId[] {
+  return ALL_MODULES.filter((m) => canUser(user, m, 'view'))
+}
+
+/** Effective data scope for a user on a module (role supreme > per-user > static). */
+export function effectiveDataScope(user: AuthUser, module: ModuleId): DataScope {
+  if (user.role === 'super_admin' || user.role === 'admin') return 'all'
+  // Role DB override is SUPREME (server cache or client-side user.roleOverrides)
+  const roleDbOv = roleOverridesCache?.[user.role]?.[module] ?? user.roleOverrides?.[module]
+  if (roleDbOv?.dataScope) return roleDbOv.dataScope
+  // Per-user override — for admin/teacher/transport_manager (full overrides) AND student/parent (dataScope only)
+  if (supportsPerUserOverrides(user.role) || supportsPerUserDataScope(user.role)) {
+    const ov = user.overrides?.[module]
+    if (ov?.dataScope) return ov.dataScope
+  }
+  // Static default
+  if (user.role === 'student') return 'own'
+  if (user.role === 'parent') return 'children'
+  if (user.role === 'teacher' || user.role === 'transport_manager') return 'assigned_classes'
+  return 'none'
+}
+
+// ============ LEGACY ROLE-ONLY FUNCTIONS ============
+
+export function can(role: Role, module: ModuleId, action: Action = 'view'): boolean {
+  const actions = PERMISSIONS[role]?.[module]
+  return !!actions && actions.includes(action)
+}
+
+export function accessibleModules(role: Role): ModuleId[] {
+  return ALL_MODULES.filter((m) => can(role, m, 'view'))
+}
+
+export function actionsFor(role: Role, module: ModuleId): Action[] {
+  return PERMISSIONS[role]?.[module] ?? []
+}
+
+// ============ DATA SCOPING HELPERS ============
+
+export function isStaff(role: Role): boolean {
+  return role === 'super_admin' || role === 'admin' || role === 'teacher' || role === 'transport_manager'
+}
+
+export function visibleStudentIds(user: AuthUser): string[] | 'all' {
+  const scope = effectiveDataScope(user, 'students')
+  if (scope === 'all') return 'all'
+  if (scope === 'own') return user.studentId ? [user.studentId] : []
+  if (scope === 'children') return user.childrenStudentIds
+  if (scope === 'assigned_classes') return 'all'
+  return []
+}
+
+export function visibleClassIds(user: AuthUser): string[] | 'all' {
+  if (user.role === 'super_admin' || user.role === 'admin') return 'all'
+  if (user.role === 'teacher' || user.role === 'transport_manager') return user.teacherClassIds
+  return 'all'
 }
