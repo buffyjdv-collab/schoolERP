@@ -389,7 +389,7 @@ function StudentProfileDrawer({ studentId, onClose }: { studentId: string; onClo
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full sm:max-w-2xl bg-background border-l shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+      <div className="relative w-full sm:max-w-2xl bg-background border-l shadow-2xl flex flex-col h-screen animate-in slide-in-from-right duration-300">
         {/* Header */}
         <div className="relative bg-gradient-to-br from-primary to-emerald-600 text-primary-foreground p-5">
           <button onClick={onClose} className="absolute top-3 right-3 p-1.5 rounded-md hover:bg-white/20"><X className="size-4" /></button>
@@ -409,7 +409,7 @@ function StudentProfileDrawer({ studentId, onClose }: { studentId: string; onClo
           </div>
         </div>
 
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-5 space-y-5">
             {/* Personal & Parent details */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
