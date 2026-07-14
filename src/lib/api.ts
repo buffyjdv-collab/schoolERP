@@ -50,7 +50,11 @@ export const api = {
     updateClass: (id: string, data: any) => jfetch<any>(`/api/academics/classes/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteClass: (id: string) => jfetch<any>(`/api/academics/classes/${id}`, { method: 'DELETE' }),
     addSection: (classId: string, data: any) => jfetch<any>(`/api/academics/classes/${classId}/sections`, { method: 'POST', body: JSON.stringify(data) }),
+    updateSection: (id: string, data: any) => jfetch<any>(`/api/academics/sections/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteSection: (id: string) => jfetch<any>(`/api/academics/sections/${id}`, { method: 'DELETE' }),
     addSubject: (classId: string, data: any) => jfetch<any>(`/api/academics/classes/${classId}/subjects`, { method: 'POST', body: JSON.stringify(data) }),
+    updateSubject: (id: string, data: any) => jfetch<any>(`/api/academics/subjects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteSubject: (id: string) => jfetch<any>(`/api/academics/subjects/${id}`, { method: 'DELETE' }),
     timetable: (classId: string, sectionId?: string) => {
       const s = new URLSearchParams({ classId, ...(sectionId ? { sectionId } : {}) }).toString()
       return jfetch<TimetableSlot[]>(`/api/academics/timetable?${s}`)

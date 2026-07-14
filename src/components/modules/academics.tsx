@@ -80,10 +80,14 @@ function ClassListItem({
 }
 
 // ============ Sections & Subjects tab ============
-function SectionsSubjectsTab({ cls, canEdit }: { cls: ClassInfo; canEdit: boolean }) {
+function SectionsSubjectsTab({ cls, canEdit, canDelete }: { cls: ClassInfo; canEdit: boolean; canDelete: boolean }) {
   const qc = useQueryClient()
   const [addSectionOpen, setAddSectionOpen] = useState(false)
   const [addSubjectOpen, setAddSubjectOpen] = useState(false)
+  const [editSection, setEditSection] = useState<any>(null)
+  const [deleteSection, setDeleteSection] = useState<any>(null)
+  const [editSubject, setEditSubject] = useState<any>(null)
+  const [deleteSubject, setDeleteSubject] = useState<any>(null)
 
   const addSectionMut = useMutation({
     mutationFn: (data: { name: string; capacity: number; teacherId: string }) =>
@@ -96,6 +100,26 @@ function SectionsSubjectsTab({ cls, canEdit }: { cls: ClassInfo; canEdit: boolea
     onError: (e: any) => toast.error('Failed to add section: ' + e.message),
   })
 
+  const updateSectionMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.academics.updateSection(id, data),
+    onSuccess: () => {
+      toast.success('Section updated')
+      qc.invalidateQueries({ queryKey: ['academics', 'classes'] })
+      setEditSection(null)
+    },
+    onError: (e: any) => toast.error('Failed: ' + e.message),
+  })
+
+  const deleteSectionMut = useMutation({
+    mutationFn: (id: string) => api.academics.deleteSection(id),
+    onSuccess: () => {
+      toast.success('Section deleted')
+      qc.invalidateQueries({ queryKey: ['academics', 'classes'] })
+      setDeleteSection(null)
+    },
+    onError: (e: any) => toast.error('Failed: ' + e.message),
+  })
+
   const addSubjectMut = useMutation({
     mutationFn: (data: { name: string; code: string; teacherId: string }) =>
       api.academics.addSubject(cls.id, data),
@@ -105,6 +129,26 @@ function SectionsSubjectsTab({ cls, canEdit }: { cls: ClassInfo; canEdit: boolea
       setAddSubjectOpen(false)
     },
     onError: (e: any) => toast.error('Failed to add subject: ' + e.message),
+  })
+
+  const updateSubjectMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.academics.updateSubject(id, data),
+    onSuccess: () => {
+      toast.success('Subject updated')
+      qc.invalidateQueries({ queryKey: ['academics', 'classes'] })
+      setEditSubject(null)
+    },
+    onError: (e: any) => toast.error('Failed: ' + e.message),
+  })
+
+  const deleteSubjectMut = useMutation({
+    mutationFn: (id: string) => api.academics.deleteSubject(id),
+    onSuccess: () => {
+      toast.success('Subject deleted')
+      qc.invalidateQueries({ queryKey: ['academics', 'classes'] })
+      setDeleteSubject(null)
+    },
+    onError: (e: any) => toast.error('Failed: ' + e.message),
   })
 
   return (
@@ -140,6 +184,20 @@ function SectionsSubjectsTab({ cls, canEdit }: { cls: ClassInfo; canEdit: boolea
                         <p className="text-[11px] text-muted-foreground">Capacity {s.capacity}</p>
                       </div>
                     </div>
+                    {(canEdit || canDelete) && (
+                      <div className="flex gap-1">
+                        {canEdit && (
+                          <Button size="icon" variant="ghost" className="size-7" onClick={() => setEditSection(s)}>
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button size="icon" variant="ghost" className="size-7 text-rose-600 hover:text-rose-700" onClick={() => setDeleteSection(s)}>
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between text-xs">
@@ -190,7 +248,8 @@ function SectionsSubjectsTab({ cls, canEdit }: { cls: ClassInfo; canEdit: boolea
                   <TableRow>
                     <TableHead className="pl-6">Subject</TableHead>
                     <TableHead>Code</TableHead>
-                    <TableHead className="pr-6">Faculty</TableHead>
+                    <TableHead>Faculty</TableHead>
+                    {(canEdit || canDelete) && <TableHead className="pr-6 text-right">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -198,7 +257,7 @@ function SectionsSubjectsTab({ cls, canEdit }: { cls: ClassInfo; canEdit: boolea
                     <TableRow key={s.id}>
                       <TableCell className="pl-6 font-medium text-sm">{s.name}</TableCell>
                       <TableCell><Badge variant="outline" className="text-[11px] tabular-nums">{s.code}</Badge></TableCell>
-                      <TableCell className="pr-6 text-sm">
+                      <TableCell className="text-sm">
                         {s.teacherName || s.teacherId ? (
                           <span className="inline-flex items-center gap-1.5">
                             <UserCircle2 className="size-3.5 text-muted-foreground" />
@@ -208,6 +267,22 @@ function SectionsSubjectsTab({ cls, canEdit }: { cls: ClassInfo; canEdit: boolea
                           <span className="text-muted-foreground italic">Not assigned</span>
                         )}
                       </TableCell>
+                      {(canEdit || canDelete) && (
+                        <TableCell className="pr-6 text-right">
+                          <div className="flex gap-1 justify-end">
+                            {canEdit && (
+                              <Button size="icon" variant="ghost" className="size-7" onClick={() => setEditSubject(s)}>
+                                <Pencil className="size-3.5" />
+                              </Button>
+                            )}
+                            {canDelete && (
+                              <Button size="icon" variant="ghost" className="size-7 text-rose-600 hover:text-rose-700" onClick={() => setDeleteSubject(s)}>
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -229,6 +304,67 @@ function SectionsSubjectsTab({ cls, canEdit }: { cls: ClassInfo; canEdit: boolea
         onSubmit={(d) => addSubjectMut.mutate(d)}
         loading={addSubjectMut.isPending}
       />
+
+      {/* Edit Section Dialog */}
+      {editSection && (
+        <Dialog open onOpenChange={() => setEditSection(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Edit Section {editSection.name}</DialogTitle></DialogHeader>
+            <EditSectionForm key={editSection.id} section={editSection} onSubmit={(data) => updateSectionMut.mutate({ id: editSection.id, data })} loading={updateSectionMut.isPending} onCancel={() => setEditSection(null)} />
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Delete Section Confirmation */}
+      {deleteSection && (
+        <AlertDialog open onOpenChange={() => setDeleteSection(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Section {deleteSection.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete Section {deleteSection.name} from {cls.name}.
+                {deleteSection.studentCount > 0 ? ` ${deleteSection.studentCount} students are assigned — reassign them first.` : ' No students are assigned to this section.'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction className="bg-rose-600 hover:bg-rose-700 text-white" disabled={deleteSectionMut.isPending || deleteSection.studentCount > 0} onClick={() => deleteSectionMut.mutate(deleteSection.id)}>
+                {deleteSectionMut.isPending ? 'Deleting…' : 'Delete Section'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {/* Edit Subject Dialog */}
+      {editSubject && (
+        <Dialog open onOpenChange={() => setEditSubject(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle>Edit Subject {editSubject.name}</DialogTitle></DialogHeader>
+            <EditSubjectForm key={editSubject.id} subject={editSubject} onSubmit={(data) => updateSubjectMut.mutate({ id: editSubject.id, data })} loading={updateSubjectMut.isPending} onCancel={() => setEditSubject(null)} />
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Delete Subject Confirmation */}
+      {deleteSubject && (
+        <AlertDialog open onOpenChange={() => setDeleteSubject(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Subject {deleteSubject.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete {deleteSubject.name} ({deleteSubject.code}) from {cls.name}.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction className="bg-rose-600 hover:bg-rose-700 text-white" disabled={deleteSubjectMut.isPending} onClick={() => deleteSubjectMut.mutate(deleteSubject.id)}>
+                {deleteSubjectMut.isPending ? 'Deleting…' : 'Delete Subject'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   )
 }
@@ -318,6 +454,56 @@ function AddSubjectDialog({ open, onOpenChange, onSubmit, loading }: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ============ Edit Section Form ============
+function EditSectionForm({ section, onSubmit, loading, onCancel }: {
+  section: any
+  onSubmit: (data: any) => void
+  loading: boolean
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(section.name || '')
+  const [capacity, setCapacity] = useState(String(section.capacity || 40))
+  const [teacherId, setTeacherId] = useState(section.teacherId || section.teacherName || '')
+  return (
+    <div className="space-y-3 py-2">
+      <div><Label>Section Name *</Label><Input value={name} onChange={e => setName(e.target.value)} placeholder="A, B, C…" /></div>
+      <div><Label>Capacity</Label><Input type="number" value={capacity} onChange={e => setCapacity(e.target.value)} /></div>
+      <div><Label>Class Teacher</Label><Input value={teacherId} onChange={e => setTeacherId(e.target.value)} placeholder="Teacher name" /></div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button disabled={!name || loading} onClick={() => onSubmit({ name, capacity: Number(capacity) || 40, teacherId })}>
+          {loading ? 'Saving…' : 'Save Changes'}
+        </Button>
+      </DialogFooter>
+    </div>
+  )
+}
+
+// ============ Edit Subject Form ============
+function EditSubjectForm({ subject, onSubmit, loading, onCancel }: {
+  subject: any
+  onSubmit: (data: any) => void
+  loading: boolean
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(subject.name || '')
+  const [code, setCode] = useState(subject.code || '')
+  const [teacherId, setTeacherId] = useState(subject.teacherId || subject.teacherName || '')
+  return (
+    <div className="space-y-3 py-2">
+      <div><Label>Subject Name *</Label><Input value={name} onChange={e => setName(e.target.value)} /></div>
+      <div><Label>Code</Label><Input value={code} onChange={e => setCode(e.target.value)} placeholder="MAT, ENG, SCI…" /></div>
+      <div><Label>Faculty</Label><Input value={teacherId} onChange={e => setTeacherId(e.target.value)} placeholder="Teacher name" /></div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button disabled={!name || loading} onClick={() => onSubmit({ name, code: code || name.slice(0, 3).toUpperCase(), teacherId })}>
+          {loading ? 'Saving…' : 'Save Changes'}
+        </Button>
+      </DialogFooter>
+    </div>
   )
 }
 
@@ -717,7 +903,7 @@ export function AcademicsModule() {
                 </TabsList>
 
                 <TabsContent value="sections" className="mt-4">
-                  <SectionsSubjectsTab cls={effectiveSelected} canEdit={canEdit} />
+                  <SectionsSubjectsTab cls={effectiveSelected} canEdit={canEdit} canDelete={canDelete} />
                 </TabsContent>
 
                 <TabsContent value="timetable" className="mt-4">
