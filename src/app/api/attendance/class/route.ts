@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const classId = searchParams.get('classId')!
   const dateStr = searchParams.get('date')!
+  const sectionId = searchParams.get('sectionId') || undefined
 
   // Teachers can only view attendance for their own classes
   if (user.role === 'teacher' && !user.teacherClassIds.includes(classId)) {
@@ -18,7 +19,11 @@ export async function GET(req: NextRequest) {
   }
 
   const d = new Date(dateStr); d.setHours(0,0,0,0)
-  const students = await db.student.findMany({ where: { classId }, include: { section: true }, orderBy: { rollNo: 'asc' } })
+  const students = await db.student.findMany({
+    where: { classId, ...(sectionId ? { sectionId } : {}) },
+    include: { section: true },
+    orderBy: { rollNo: 'asc' },
+  })
   const records = await db.attendance.findMany({ where: { date: d, studentId: { in: students.map(s => s.id) } } })
   const map = new Map(records.map(r => [r.studentId, r.status]))
   return NextResponse.json(students.map(s => ({

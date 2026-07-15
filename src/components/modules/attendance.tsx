@@ -23,6 +23,7 @@ import {
 import {
   CalendarCheck, CalendarDays, UserCheck, UserX, Clock3, Plane, Radio, Cpu,
   DoorOpen, LogIn, Save, CheckCheck, RefreshCw, GraduationCap, ScanLine,
+  ChevronDown, TrendingUp, Users, CalendarRange,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -73,12 +74,6 @@ function todayStr(): string {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
-}
-
-function rateColor(r: number): string {
-  if (r >= 90) return 'bg-emerald-500'
-  if (r >= 75) return 'bg-amber-500'
-  return 'bg-rose-500'
 }
 
 // ============================================================
@@ -135,15 +130,26 @@ function MarkAttendancePanel({
 }) {
   const qc = useQueryClient()
   const [classId, setClassId] = useState<string>('')
+  const [sectionId, setSectionId] = useState<string>('')
   const [date, setDate] = useState<string>(todayStr())
   const [edits, setEdits] = useState<Record<string, AttStatus>>({})
 
   // Reset classId to first class on first load (no set-state-in-effect; safe initial state via useMemo)
   const effectiveClassId = classId || (classes[0]?.id ?? '')
+  // Reset section when class changes
+  const [prevClassId, setPrevClassId] = useState(effectiveClassId)
+  if (effectiveClassId !== prevClassId) {
+    setPrevClassId(effectiveClassId)
+    setSectionId('')
+  }
+
+  const selectedClass = classes.find((c) => c.id === effectiveClassId)
+  const classSections = selectedClass?.sections ?? []
+  const effectiveSectionId = sectionId && sectionId !== '__all__' ? sectionId : undefined
 
   const attQ = useQuery({
-    queryKey: ['attendance', 'class', effectiveClassId, date],
-    queryFn: () => api.attendance.classAttendance(effectiveClassId, date),
+    queryKey: ['attendance', 'class', effectiveClassId, effectiveSectionId ?? 'all', date],
+    queryFn: () => api.attendance.classAttendance(effectiveClassId, date, effectiveSectionId),
     enabled: !!effectiveClassId && !!date,
   })
 
@@ -211,7 +217,7 @@ function MarkAttendancePanel({
       })
       setEdits({})
       qc.invalidateQueries({ queryKey: ['attendance', 'summary'] })
-      qc.invalidateQueries({ queryKey: ['attendance', 'class', effectiveClassId, date] })
+      qc.invalidateQueries({ queryKey: ['attendance', 'class', effectiveClassId, effectiveSectionId ?? 'all', date] })
     } catch (e: any) {
       toast.error('Failed to save attendance', { description: e?.message || 'Please retry.' })
     }
@@ -250,6 +256,20 @@ function MarkAttendancePanel({
                 ))}
               </SelectContent>
             </Select>
+            {classSections.length > 0 && (
+              <Select value={sectionId || '__all__'} onValueChange={(v) => { setSectionId(v); setEdits({}) }}>
+                <SelectTrigger size="sm" className="w-40">
+                  <Users className="size-3.5 text-muted-foreground" />
+                  <SelectValue placeholder="All Sections" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All Sections</SelectItem>
+                  {classSections.map((sec) => (
+                    <SelectItem key={sec.id} value={sec.id}>{sec.name} · {sec.studentCount ?? 0}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <div className="relative">
               <input
                 type="date"
@@ -372,54 +392,230 @@ function MarkAttendancePanel({
 }
 
 // ============================================================
-// Class-wise attendance (right pane)
+// Class-wise attendance — modern expandable view with Day/Month toggle
 // ============================================================
-function ClassWiseAttendance({
-  byClass, loading,
-}: {
-  byClass: { label: string; rate: number }[]
-  loading: boolean
-}) {
-  const max = 100
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function rateBadgeClass(r: number): string {
+  if (r >= 90) return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-semibold'
+  if (r >= 75) return 'bg-amber-500/15 text-amber-700 dark:text-amber-400 font-semibold'
+  if (r > 0) return 'bg-rose-500/15 text-rose-700 dark:text-rose-400 font-semibold'
+  return 'bg-muted text-muted-foreground font-medium'
+}
+
+function rateBarClass(r: number): string {
+  if (r >= 90) return 'bg-gradient-to-r from-emerald-500 to-teal-500'
+  if (r >= 75) return 'bg-gradient-to-r from-amber-500 to-orange-500'
+  if (r > 0) return 'bg-gradient-to-r from-rose-500 to-red-500'
+  return 'bg-muted-foreground/30'
+}
+
+function ClassWiseAttendance() {
+  const [mode, setMode] = useState<'day' | 'month'>('day')
+  const today = new Date()
+  const [date, setDate] = useState<string>(todayStr())
+  const [month, setMonth] = useState<string>(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`)
+  const [expandedClass, setExpandedClass] = useState<string | null>(null)
+
+  // Adjust state during render when mode changes (avoids useEffect)
+  const [prevMode, setPrevMode] = useState(mode)
+  if (prevMode !== mode) {
+    setPrevMode(mode)
+    setExpandedClass(null)
+  }
+
+  const cwQ = useQuery({
+    queryKey: ['attendance', 'class-wise', mode, mode === 'day' ? date : month],
+    queryFn: () => api.attendance.classWise(mode === 'day' ? { mode: 'day', date } : { mode: 'month', month }),
+  })
+
+  const data = cwQ.data ?? []
+  const sortedData = [...data].sort((a, b) => b.rate - a.rate)
+  const overallRate = data.length ? Math.round(data.reduce((acc, d) => acc + d.rate, 0) / data.length) : 0
+
+  const handleDateChange = (v: string) => { setDate(v); setExpandedClass(null) }
+  const handleMonthChange = (v: string) => { setMonth(v); setExpandedClass(null) }
+
   return (
-    <Card className="h-full">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <GraduationCap className="size-4 text-primary" /> Class-wise Attendance
-        </CardTitle>
-        <CardDescription className="text-xs">Today&apos;s present-rate by class.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+    <Card className="overflow-hidden border-primary/20">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="size-4 text-primary" /> Class-wise Attendance
+            </CardTitle>
+            <CardDescription className="text-xs mt-0.5">
+              {mode === 'day' ? 'Attendance % for the selected day' : 'Monthly attendance % breakdown'} · click a class to expand sections
+            </CardDescription>
           </div>
-        ) : byClass.length === 0 ? (
-          <EmptyState icon={GraduationCap} title="No data" description="Attendance records will appear here once marked." />
+          {/* Mode toggle */}
+          <div className="inline-flex items-center gap-0.5 rounded-lg bg-muted/50 p-0.5">
+            <button
+              type="button"
+              onClick={() => setMode('day')}
+              className={cn(
+                'inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-all',
+                mode === 'day' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <CalendarDays className="size-3.5" /> Day
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('month')}
+              className={cn(
+                'inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-all',
+                mode === 'month' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <CalendarRange className="size-3.5" /> Month
+            </button>
+          </div>
+        </div>
+
+        {/* Date/Month selector + overall rate */}
+        <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t">
+          {mode === 'day' ? (
+            <div className="relative">
+              <CalendarDays className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="h-8 rounded-md border border-input bg-transparent pl-8 pr-2.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] dark:bg-input/30"
+                aria-label="Attendance date"
+              />
+            </div>
+          ) : (
+            <div className="relative">
+              <CalendarRange className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+              <input
+                type="month"
+                value={month}
+                onChange={(e) => handleMonthChange(e.target.value)}
+                className="h-8 rounded-md border border-input bg-transparent pl-8 pr-2.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] dark:bg-input/30"
+                aria-label="Attendance month"
+              />
+            </div>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Overall</span>
+            <span className={cn('text-sm font-bold tabular-nums px-2 py-0.5 rounded', rateBadgeClass(overallRate))}>
+              {overallRate}%
+            </span>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="px-0 pb-0">
+        {cwQ.isLoading ? (
+          <div className="px-6 pb-6 space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
+          </div>
+        ) : cwQ.isError ? (
+          <div className="px-6 pb-6">
+            <EmptyState icon={RefreshCw} title="Failed to load" description="Please retry." />
+          </div>
+        ) : sortedData.length === 0 ? (
+          <div className="px-6 pb-6">
+            <EmptyState icon={GraduationCap} title="No data" description="Attendance records will appear here once marked." />
+          </div>
         ) : (
-          <div className="max-h-[55vh] overflow-y-auto scroll-thin space-y-3 pr-1">
-            {byClass
-              .slice()
-              .sort((a, b) => b.rate - a.rate)
-              .map((c) => (
-                <div key={c.label} className="group">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium">{c.label}</span>
-                    <span className={cn(
-                      'text-xs font-semibold tabular-nums px-1.5 py-0.5 rounded',
-                      c.rate >= 90 ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                        : c.rate >= 75 ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
-                          : 'bg-rose-500/10 text-rose-700 dark:text-rose-400',
-                    )}>{c.rate}%</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className={cn('h-full rounded-full transition-all', rateColor(c.rate))}
-                      style={{ width: `${Math.min(c.rate, max)}%` }}
-                    />
-                  </div>
+          <div className="max-h-[60vh] overflow-y-auto scroll-thin border-t divide-y">
+            {sortedData.map((c) => {
+              const isExpanded = expandedClass === c.classId
+              const goodSections = c.sections.filter((s) => s.rate >= 90).length
+              const totalStudents = c.sections.reduce((acc, s) => acc + s.studentCount, 0)
+              return (
+                <div key={c.classId} className="transition-colors">
+                  {/* Class header row (clickable) */}
+                  <button
+                    type="button"
+                    onClick={() => setExpandedClass(isExpanded ? null : c.classId)}
+                    className="w-full text-left px-6 py-3 hover:bg-accent/40 transition-colors flex items-center gap-3"
+                  >
+                    <div className={cn(
+                      'size-9 rounded-lg grid place-items-center shrink-0 transition-colors',
+                      c.rate >= 90 ? 'bg-emerald-500/15 text-emerald-600'
+                        : c.rate >= 75 ? 'bg-amber-500/15 text-amber-600'
+                          : 'bg-rose-500/15 text-rose-600',
+                    )}>
+                      <GraduationCap className="size-4.5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-sm">{c.className}</p>
+                        <Badge variant="outline" className="text-[10px] gap-1">
+                          <Users className="size-2.5" /> {totalStudents}
+                        </Badge>
+                        {c.sections.length > 0 && goodSections > 0 && (
+                          <Badge variant="outline" className="text-[10px] gap-1 text-emerald-700 dark:text-emerald-400">
+                            <CheckCheck className="size-2.5" /> {goodSections}/{c.sections.length} ≥90%
+                          </Badge>
+                        )}
+                      </div>
+                      {/* Progress bar */}
+                      <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={cn('h-full rounded-full transition-all duration-500', rateBarClass(c.rate))}
+                          style={{ width: `${Math.max(c.rate, 2)}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={cn('text-sm font-bold tabular-nums px-2 py-0.5 rounded', rateBadgeClass(c.rate))}>
+                        {c.rate}%
+                      </span>
+                      <ChevronDown className={cn(
+                        'size-4 text-muted-foreground transition-transform',
+                        isExpanded && 'rotate-180',
+                      )} />
+                    </div>
+                  </button>
+
+                  {/* Expanded sections */}
+                  {isExpanded && (
+                    <div className="px-6 pb-3 pt-1 bg-muted/20 space-y-2">
+                      {c.sections.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic py-2 pl-12">No sections in this class.</p>
+                      ) : (
+                        c.sections.map((sec) => (
+                          <div key={sec.sectionId} className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2">
+                            <div className={cn(
+                              'size-7 rounded-md grid place-items-center shrink-0 text-[11px] font-bold',
+                              sec.rate >= 90 ? 'bg-emerald-500/10 text-emerald-600'
+                                : sec.rate >= 75 ? 'bg-amber-500/10 text-amber-600'
+                                  : 'bg-rose-500/10 text-rose-600',
+                            )}>
+                              {sec.sectionName.charAt(0)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="text-xs font-medium">Section {sec.sectionName}</p>
+                                <span className="text-[10px] text-muted-foreground">{sec.studentCount} students</span>
+                                {sec.totalRecords > 0 && (
+                                  <span className="text-[10px] text-muted-foreground">· {sec.totalRecords} records</span>
+                                )}
+                              </div>
+                              {/* Mini progress bar */}
+                              <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden">
+                                <div
+                                  className={cn('h-full rounded-full transition-all duration-500', rateBarClass(sec.rate))}
+                                  style={{ width: `${Math.max(sec.rate, 2)}%` }}
+                                />
+                              </div>
+                            </div>
+                            <span className={cn('text-xs font-bold tabular-nums px-1.5 py-0.5 rounded shrink-0', rateBadgeClass(sec.rate))}>
+                              {sec.rate}%
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
+              )
+            })}
           </div>
         )}
       </CardContent>
@@ -862,7 +1058,6 @@ export function AttendanceModule() {
   const classesQ = useQuery({ queryKey: ['academics', 'classes'], queryFn: api.academics.classes })
 
   const summary = summaryQ.data
-  const byClass = summary?.byClass ?? []
 
   return (
     <div className="space-y-6">
@@ -926,23 +1121,17 @@ export function AttendanceModule() {
         </TabsList>
 
         {canMark ? (
-          <TabsContent value="mark" className="mt-4">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-              <div className="lg:col-span-2">
-                {classesQ.isLoading ? (
-                  <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
-                ) : classesQ.isError ? (
-                  <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load classes" description="Please retry." /></CardContent></Card>
-                ) : (classesQ.data ?? []).length === 0 ? (
-                  <Card><CardContent className="py-2"><EmptyState icon={GraduationCap} title="No classes found" description="Set up classes in Academics to mark attendance." /></CardContent></Card>
-                ) : (
-                  <MarkAttendancePanel classes={classesQ.data!} />
-                )}
-              </div>
-              <div className="lg:col-span-1">
-                <ClassWiseAttendance byClass={byClass} loading={summaryQ.isLoading} />
-              </div>
-            </div>
+          <TabsContent value="mark" className="mt-4 space-y-4">
+            {classesQ.isLoading ? (
+              <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+            ) : classesQ.isError ? (
+              <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load classes" description="Please retry." /></CardContent></Card>
+            ) : (classesQ.data ?? []).length === 0 ? (
+              <Card><CardContent className="py-2"><EmptyState icon={GraduationCap} title="No classes found" description="Set up classes in Academics to mark attendance." /></CardContent></Card>
+            ) : (
+              <MarkAttendancePanel classes={classesQ.data!} />
+            )}
+            <ClassWiseAttendance />
           </TabsContent>
         ) : (
           <TabsContent value="mine" className="mt-4">

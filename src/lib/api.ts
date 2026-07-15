@@ -66,7 +66,14 @@ export const api = {
   attendance: {
     summary: (classId?: string) => jfetch<{ rate: number; present: number; absent: number; late: number; leave: number; byClass: { label: string; rate: number }[] }>(`/api/attendance/summary${classId ? '?classId=' + classId : ''}`),
     mark: (data: { studentId: string; date: string; status: string; method?: string }) => jfetch<any>('/api/attendance/mark', { method: 'POST', body: JSON.stringify(data) }),
-    classAttendance: (classId: string, date: string) => jfetch<{ student: Student; status: string }[]>(`/api/attendance/class?classId=${classId}&date=${date}`),
+    classAttendance: (classId: string, date: string, sectionId?: string) => {
+      const s = new URLSearchParams({ classId, date, ...(sectionId ? { sectionId } : {}) }).toString()
+      return jfetch<{ student: Student; status: string }[]>(`/api/attendance/class?${s}`)
+    },
+    classWise: (params: { mode: 'day' | 'month'; date?: string; month?: string }) => {
+      const s = new URLSearchParams({ mode: params.mode, ...(params.date ? { date: params.date } : {}), ...(params.month ? { month: params.month } : {}) }).toString()
+      return jfetch<{ classId: string; className: string; rate: number; totalRecords: number; sections: { sectionId: string; sectionName: string; rate: number; studentCount: number; totalRecords: number }[] }[]>(`/api/attendance/class-wise?${s}`)
+    },
   },
   fees: {
     structures: () => jfetch<FeeStructure[]>('/api/fees/structures'),
