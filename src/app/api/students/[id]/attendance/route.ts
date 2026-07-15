@@ -21,6 +21,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const guard = await canAccessStudent(id)
   if (!guard.ok) return guard.res
-  const records = await db.attendance.findMany({ where: { studentId: id }, include: { student: true }, orderBy: { date: 'desc' }, take: 60 })
+  const records = await db.attendance.findMany({ where: { studentId: id }, include: { student: true }, orderBy: { date: 'desc' }, take: 500 })
   return NextResponse.json(records.map(r => ({ id: r.id, studentId: r.studentId, studentName: `${r.student.firstName} ${r.student.lastName}`, admissionNo: r.student.admissionNo, date: r.date.toISOString(), status: r.status, method: r.method })))
 }

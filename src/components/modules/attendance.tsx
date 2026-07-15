@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type { ClassInfo, Student, AttendanceRecord } from '@/lib/types'
@@ -21,9 +21,12 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from '@/components/ui/select'
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog'
+import {
   CalendarCheck, CalendarDays, UserCheck, UserX, Clock3, Plane, Radio, Cpu,
   DoorOpen, LogIn, Save, CheckCheck, RefreshCw, GraduationCap, ScanLine,
-  ChevronDown, TrendingUp, Users, CalendarRange,
+  ChevronDown, TrendingUp, Users, CalendarRange, ChevronRight, X, History,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -133,6 +136,7 @@ function MarkAttendancePanel({
   const [sectionId, setSectionId] = useState<string>('')
   const [date, setDate] = useState<string>(todayStr())
   const [edits, setEdits] = useState<Record<string, AttStatus>>({})
+  const [historyStudent, setHistoryStudent] = useState<{ id: string; name: string; admissionNo: string; sectionName?: string | null } | null>(null)
 
   // Reset classId to first class on first load (no set-state-in-effect; safe initial state via useMemo)
   const effectiveClassId = classId || (classes[0]?.id ?? '')
@@ -359,13 +363,26 @@ function MarkAttendancePanel({
                         <Badge variant="outline" className="text-[11px] tabular-nums">{r.student.admissionNo}</Badge>
                       </TableCell>
                       <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryStudent({
+                            id: r.student.id,
+                            name: r.student.fullName,
+                            admissionNo: r.student.admissionNo,
+                            sectionName: r.student.sectionName,
+                          })}
+                          className="flex items-center gap-2 text-left rounded-md p-0.5 -m-0.5 hover:bg-accent/60 transition-colors w-full group/name"
+                          title="Click to view attendance history"
+                        >
                           <div className="size-7 rounded-full bg-primary/10 text-primary grid place-items-center text-[10px] font-bold shrink-0">
                             {r.student.firstName?.[0]}{r.student.lastName?.[0]}
                           </div>
-                          <span className="truncate">{r.student.fullName}</span>
+                          <span className="truncate inline-flex items-center gap-1">
+                            {r.student.fullName}
+                            <History className="size-3 text-muted-foreground/0 group-hover/name:text-primary transition-colors" />
+                          </span>
                           {dirty && <span className="size-1.5 rounded-full bg-primary animate-pulse" title="Unsaved change" />}
-                        </div>
+                        </button>
                       </TableCell>
                       <TableCell className="hidden md:table-cell text-muted-foreground text-xs">{r.student.sectionName || '-'}</TableCell>
                       <TableCell className="pr-6">
@@ -387,7 +404,251 @@ function MarkAttendancePanel({
           </div>
         )}
       </CardContent>
+
+      <StudentAttendanceHistoryDialog
+        student={historyStudent}
+        open={historyStudent !== null}
+        onOpenChange={(v) => { if (!v) setHistoryStudent(null) }}
+      />
     </Card>
+  )
+}
+
+// ============================================================
+// Student Attendance History Dialog (lightbox)
+// Shows month-wise collapsible attendance history when a student is clicked.
+// ============================================================
+const HISTORY_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+
+function statusChipClass(status: string): string {
+  if (status === 'Present') return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+  if (status === 'Absent') return 'bg-rose-500/15 text-rose-700 dark:text-rose-400'
+  if (status === 'Late') return 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+  if (status === 'Leave') return 'bg-sky-500/15 text-sky-700 dark:text-sky-400'
+  if (status === 'HalfDay') return 'bg-violet-500/15 text-violet-700 dark:text-violet-400'
+  return 'bg-muted text-muted-foreground'
+}
+
+function statusDotClass(status: string): string {
+  if (status === 'Present') return 'bg-emerald-500'
+  if (status === 'Absent') return 'bg-rose-500'
+  if (status === 'Late') return 'bg-amber-500'
+  if (status === 'Leave') return 'bg-sky-500'
+  if (status === 'HalfDay') return 'bg-violet-500'
+  return 'bg-muted-foreground'
+}
+
+function StudentAttendanceHistoryDialog({
+  student, open, onOpenChange,
+}: {
+  student: { id: string; name: string; admissionNo: string; sectionName?: string | null } | null
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}) {
+  const attQ = useQuery({
+    queryKey: ['students', student?.id, 'attendance', 'history'],
+    queryFn: () => api.students.attendance(student!.id),
+    enabled: !!student?.id && open,
+  })
+
+  const records: AttendanceRecord[] = attQ.data ?? []
+
+  // Group records by month (YYYY-MM)
+  const monthGroups = useMemo(() => {
+    const map = new Map<string, AttendanceRecord[]>()
+    for (const r of records) {
+      const d = new Date(r.date)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(r)
+    }
+    // Sort months descending (most recent first)
+    return Array.from(map.entries())
+      .map(([key, recs]) => {
+        const [year, month] = key.split('-').map(Number)
+        const present = recs.filter(r => r.status === 'Present').length
+        const absent = recs.filter(r => r.status === 'Absent').length
+        const late = recs.filter(r => r.status === 'Late').length
+        const leave = recs.filter(r => r.status === 'Leave').length
+        const halfDay = recs.filter(r => r.status === 'HalfDay').length
+        const rate = recs.length ? Math.round((present / recs.length) * 100) : 0
+        // Sort records within month by date descending
+        recs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        return { key, year, month, label: `${HISTORY_MONTH_NAMES[month - 1]} ${year}`, records: recs, present, absent, late, leave, halfDay, total: recs.length, rate }
+      })
+      .sort((a, b) => b.key.localeCompare(a.key))
+  }, [records])
+
+  // Overall stats
+  const totalPresent = records.filter(r => r.status === 'Present').length
+  const overallRate = records.length ? Math.round((totalPresent / records.length) * 100) : 0
+
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(null)
+  // Auto-expand the most recent month on first load
+  const [prevStudentId, setPrevStudentId] = useState(student?.id ?? '')
+  if (student?.id && student.id !== prevStudentId) {
+    setPrevStudentId(student.id)
+    setExpandedMonth(monthGroups[0]?.key ?? null)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col gap-0 p-0">
+        {/* Header */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>Attendance History</DialogTitle>
+          <DialogDescription>Month-wise attendance breakdown for {student?.name}</DialogDescription>
+        </DialogHeader>
+
+        {/* Modern gradient header */}
+        <div className="relative bg-gradient-to-br from-primary to-emerald-600 text-primary-foreground p-5 overflow-hidden">
+          <div className="absolute -top-10 -right-10 size-32 rounded-full bg-white/10 blur-2xl" />
+          <div className="relative flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="size-11 rounded-xl bg-white/20 backdrop-blur grid place-items-center shrink-0">
+                <History className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-base truncate">{student?.name ?? 'Student'}</p>
+                <p className="text-xs opacity-90">
+                  {student?.admissionNo}
+                  {student?.sectionName ? ` · Section ${student.sectionName}` : ''}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="size-8 rounded-lg bg-white/15 hover:bg-white/25 grid place-items-center transition-colors shrink-0"
+              aria-label="Close"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+
+          {/* Overall stats strip */}
+          <div className="relative mt-4 flex items-center gap-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-wide opacity-80">Overall Rate</p>
+              <p className="text-2xl font-bold tabular-nums">{overallRate}%</p>
+            </div>
+            <div className="h-8 w-px bg-white/20" />
+            <div>
+              <p className="text-[10px] uppercase tracking-wide opacity-80">Records</p>
+              <p className="text-2xl font-bold tabular-nums">{records.length}</p>
+            </div>
+            <div className="h-8 w-px bg-white/20" />
+            <div>
+              <p className="text-[10px] uppercase tracking-wide opacity-80">Months</p>
+              <p className="text-2xl font-bold tabular-nums">{monthGroups.length}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Body — month-wise collapsible */}
+        <div className="flex-1 overflow-y-auto scroll-thin">
+          {attQ.isLoading ? (
+            <div className="p-5 space-y-3">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
+            </div>
+          ) : attQ.isError ? (
+            <div className="p-5"><EmptyState icon={RefreshCw} title="Failed to load" description="Please retry." /></div>
+          ) : monthGroups.length === 0 ? (
+            <div className="p-5"><EmptyState icon={CalendarDays} title="No attendance records" description="This student has no attendance history yet." /></div>
+          ) : (
+            <div className="divide-y">
+              {monthGroups.map((mg) => {
+                const isExpanded = expandedMonth === mg.key
+                return (
+                  <div key={mg.key} className="transition-colors">
+                    {/* Month header (clickable) */}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedMonth(isExpanded ? null : mg.key)}
+                      className="w-full text-left px-5 py-3 hover:bg-accent/40 transition-colors flex items-center gap-3"
+                    >
+                      <div className={cn(
+                        'size-9 rounded-lg grid place-items-center shrink-0 text-xs font-bold',
+                        mg.rate >= 90 ? 'bg-emerald-500/15 text-emerald-600'
+                          : mg.rate >= 75 ? 'bg-amber-500/15 text-amber-600'
+                            : 'bg-rose-500/15 text-rose-600',
+                      )}>
+                        {HISTORY_MONTH_NAMES[mg.month - 1].slice(0, 3)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-sm">{mg.label}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {/* Mini status badges */}
+                          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <span className="size-1.5 rounded-full bg-emerald-500" />{mg.present}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <span className="size-1.5 rounded-full bg-rose-500" />{mg.absent}
+                          </span>
+                          {mg.late > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                              <span className="size-1.5 rounded-full bg-amber-500" />{mg.late}
+                            </span>
+                          )}
+                          {mg.leave > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                              <span className="size-1.5 rounded-full bg-sky-500" />{mg.leave}
+                            </span>
+                          )}
+                          <span className="text-[10px] text-muted-foreground ml-1">· {mg.total} days</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={cn(
+                          'text-sm font-bold tabular-nums px-2 py-0.5 rounded',
+                          mg.rate >= 90 ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                            : mg.rate >= 75 ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                              : 'bg-rose-500/15 text-rose-700 dark:text-rose-400',
+                        )}>
+                          {mg.rate}%
+                        </span>
+                        <ChevronDown className={cn(
+                          'size-4 text-muted-foreground transition-transform',
+                          isExpanded && 'rotate-180',
+                        )} />
+                      </div>
+                    </button>
+
+                    {/* Expanded daily records */}
+                    {isExpanded && (
+                      <div className="px-5 pb-3 pt-1 bg-muted/20">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {mg.records.map((r) => {
+                            const d = new Date(r.date)
+                            return (
+                              <div key={r.id} className="flex items-center gap-2 rounded-lg border bg-card px-2.5 py-1.5">
+                                <span className={cn('size-2 rounded-full shrink-0', statusDotClass(r.status))} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[11px] font-medium">
+                                    {d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}
+                                  </p>
+                                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide">{r.method}</p>
+                                </div>
+                                <span className={cn(
+                                  'text-[10px] font-semibold px-1.5 py-0.5 rounded tabular-nums',
+                                  statusChipClass(r.status),
+                                )}>
+                                  {r.status}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

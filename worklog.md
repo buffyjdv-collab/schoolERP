@@ -762,3 +762,33 @@ Stage Summary:
 - Marks entry uses batch save — no auto-save. Teachers fill all students' marks, then click "Save All". Counter shows how many students are ready.
 - Progress card (modern UI) opens on student name click. Only admin + class teacher can view/download. Card is locked until ALL subjects' marks are entered for that student.
 - Lint: 0 errors. Dev server running on port 3000.
+
+---
+Task ID: attendance-student-history-lightbox
+Agent: main
+Task: Upon clicking a student in Mark Attendance, open a lightbox showing attendance history month-wise collapsible.
+
+Work Log:
+- Increased the student attendance API limit from 60 to 500 records (`/api/students/[id]/attendance`) so the history view has enough data for multiple months.
+- Added imports: `useMemo`, `Dialog`/`DialogContent`/`DialogHeader`/`DialogTitle`/`DialogDescription`, and icons `ChevronRight`, `X`, `History`.
+- Created `StudentAttendanceHistoryDialog` component:
+  - Takes `student` (id, name, admissionNo, sectionName), `open`, `onOpenChange`.
+  - Fetches attendance records via `api.students.attendance(id)` (enabled when dialog is open).
+  - Groups records by month (YYYY-MM) using `useMemo`, sorted descending (most recent first).
+  - Each month group: label (e.g. "June 2026"), rate %, present/absent/late/leave counts, total days.
+  - Auto-expands the most recent month on first load (adjust-state-during-render pattern).
+  - Collapsible month rows: click to expand/collapse daily records.
+  - Expanded view shows a 2-column grid of daily record cards: date (weekday, day, month), method, status badge with color-coded dot.
+  - Modern gradient header (primary→emerald) with student name, admission no, section, and overall stats strip (Overall Rate, Records, Months).
+  - Close button (X) in the header.
+- Added `historyStudent` state to `MarkAttendancePanel`.
+- Made the student name cell a clickable `<button>` with a `History` icon that appears on hover (group/name hover).
+- Renders `StudentAttendanceHistoryDialog` at the bottom of `MarkAttendancePanel`.
+- Lint: 0 errors.
+
+Browser verification (admin):
+- Clicked a student in Mark Attendance → dialog opened with gradient header showing student name + admission no + section.
+- Overall stats: Rate 100%, Records 27, Months 3.
+- Month groups: July 2026 (1 day), June 2026 (16 days), May 2026 (10 days) — each collapsible.
+- Expanded June 2026 → 16 daily record cards in a 2-column grid, each showing date (e.g. "Thu, 18 Jun"), method (Manual/UHF), and status badge (Present).
+- History icon appears on student name hover.
