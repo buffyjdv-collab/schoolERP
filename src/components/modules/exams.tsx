@@ -466,7 +466,9 @@ function MarksSheetTab({
       }
       if (!existing) byStudent.set(m.studentId, r)
       r.cells[m.subject] = m
-      if (m.obtained != null) { r.total += m.obtained; r.maxTotal += m.maxMarks }
+      // Use the subject's max from the exam (not m.maxMarks which may be stale=100)
+      const subjMax = subjectSet.get(m.subject)?.max ?? m.maxMarks ?? examMax
+      if (m.obtained != null) { r.total += m.obtained; r.maxTotal += subjMax }
     }
     const rows = Array.from(byStudent.values())
       .map((r) => ({ ...r, pct: r.maxTotal ? Math.round((r.total / r.maxTotal) * 100) : 0 }))
@@ -667,10 +669,10 @@ function MarksSheetTab({
                 <TableRow>
                   <TableHead className="pl-6 sticky left-0 bg-card z-20 min-w-[180px]">Student</TableHead>
                   {subjects.map((s) => (
-                    <TableHead key={s.name} className="text-center min-w-[90px]">
+                    <TableHead key={s.name} className="text-center min-w-[100px]">
                       <div className="flex flex-col items-center">
-                        <span className="text-[11px]">{s.name}</span>
-                        <span className="text-[10px] text-muted-foreground tabular-nums">/{s.max}</span>
+                        <span className="text-[11px] font-medium">{s.name}</span>
+                        <span className="text-[10px] text-muted-foreground tabular-nums">Max: {s.max}</span>
                       </div>
                     </TableHead>
                   ))}
@@ -703,7 +705,9 @@ function MarksSheetTab({
                     {subjects.map((s) => {
                       const cell = r.cells[s.name]
                       const obtained = cell?.obtained
-                      const pct = cell && cell.maxMarks ? Math.round(((obtained ?? 0) / cell.maxMarks) * 100) : 0
+                      // Always use the subject's max (from exam.maxMarks) — not the
+                      // cell's maxMarks which may be stale (100) from old data.
+                      const pct = s.max ? Math.round(((obtained ?? 0) / s.max) * 100) : 0
                       if (canEnter && editMode) {
                         const draftVal = draftMarks[r.studentId]?.[s.name] ?? ''
                         return (
@@ -722,13 +726,18 @@ function MarksSheetTab({
                       }
                       return (
                         <TableCell key={s.name} className="text-center">
-                          {cell ? (
-                            <span className={cn(
-                              'inline-flex items-center justify-center min-w-[44px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
-                              obtained == null ? 'bg-muted/50 text-muted-foreground' : pctColorClass(pct),
-                            )} title={cell.grade ? `Grade: ${cell.grade}` : undefined}>
-                              {obtained == null ? '—' : obtained}
-                            </span>
+                          {cell && obtained != null ? (
+                            <div className="inline-flex flex-col items-center gap-0.5">
+                              <span className={cn(
+                                'inline-flex items-center justify-center min-w-[48px] px-1.5 py-0.5 rounded text-[11px] tabular-nums font-semibold',
+                                pctColorClass(pct),
+                              )} title={cell.grade ? `Grade: ${cell.grade}` : undefined}>
+                                {obtained}/{s.max}
+                              </span>
+                              <span className="text-[9px] text-muted-foreground tabular-nums">{pct}%</span>
+                            </div>
+                          ) : cell ? (
+                            <span className="text-muted-foreground/40 text-xs">—</span>
                           ) : (
                             <span className="text-muted-foreground/40 text-xs">—</span>
                           )}
@@ -1222,6 +1231,9 @@ export function ExamsModule() {
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant="outline" className="gap-1 text-[11px]"><BookOpen className="size-3" /> {selectedExam.examType}</Badge>
+                    {selectedClass && (
+                      <Badge variant="outline" className="gap-1 text-[11px]"><GraduationCap className="size-3" /> {selectedClass.name}</Badge>
+                    )}
                     {selectedExam.subject && (
                       <Badge variant="outline" className="gap-1 text-[11px]"><FileText className="size-3" /> {selectedExam.subject}</Badge>
                     )}
