@@ -437,7 +437,7 @@ function ClassWiseAttendance() {
   const handleMonthChange = (v: string) => { setMonth(v); setExpandedClass(null) }
 
   return (
-    <Card className="overflow-hidden border-primary/20">
+    <Card className="h-full overflow-hidden border-primary/20">
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -1121,17 +1121,23 @@ export function AttendanceModule() {
         </TabsList>
 
         {canMark ? (
-          <TabsContent value="mark" className="mt-4 space-y-4">
-            {classesQ.isLoading ? (
-              <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
-            ) : classesQ.isError ? (
-              <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load classes" description="Please retry." /></CardContent></Card>
-            ) : (classesQ.data ?? []).length === 0 ? (
-              <Card><CardContent className="py-2"><EmptyState icon={GraduationCap} title="No classes found" description="Set up classes in Academics to mark attendance." /></CardContent></Card>
-            ) : (
-              <MarkAttendancePanel classes={classesQ.data!} />
-            )}
-            <ClassWiseAttendance />
+          <TabsContent value="mark" className="mt-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+              <div className="lg:col-span-2">
+                {classesQ.isLoading ? (
+                  <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+                ) : classesQ.isError ? (
+                  <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load classes" description="Please retry." /></CardContent></Card>
+                ) : (classesQ.data ?? []).length === 0 ? (
+                  <Card><CardContent className="py-2"><EmptyState icon={GraduationCap} title="No classes found" description="Set up classes in Academics to mark attendance." /></CardContent></Card>
+                ) : (
+                  <MarkAttendancePanel classes={classesQ.data!} />
+                )}
+              </div>
+              <div className="lg:col-span-1">
+                <ClassWiseAttendance />
+              </div>
+            </div>
           </TabsContent>
         ) : (
           <TabsContent value="mine" className="mt-4">

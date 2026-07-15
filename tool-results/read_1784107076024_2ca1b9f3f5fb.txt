@@ -1,0 +1,1407 @@
+     1→'use client'
+     2→
+     3→import { useMemo, useState } from 'react'
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→import { api } from '@/lib/api'
+     6→import type { Exam, ExamMark, Student } from '@/lib/types'
+     7→import { useCan, useStore } from '@/lib/store'
+     8→import { StatCard, SectionHeader, StatusBadge, EmptyState } from '@/components/erp/primitives'
+     9→import {
+    10→  Card, CardContent, CardHeader, CardTitle, CardDescription,
+    11→} from '@/components/ui/card'
+    12→import { Button } from '@/components/ui/button'
+    13→import { Input } from '@/components/ui/input'
+    14→import { Label } from '@/components/ui/label'
+    15→import { Badge } from '@/components/ui/badge'
+    16→import { Skeleton } from '@/components/ui/skeleton'
+    17→import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+    18→import {
+    19→  Table, TableHeader, TableBody, TableHead, TableRow, TableCell, TableFooter,
+    20→} from '@/components/ui/table'
+    21→import {
+    22→  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+    23→} from '@/components/ui/select'
+    24→import {
+    25→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+    26→} from '@/components/ui/dialog'
+    27→import {
+    28→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+    29→  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    30→} from '@/components/ui/alert-dialog'
+    31→import {
+    32→  ClipboardList, CheckCircle2, FileBarChart2, FileText, GraduationCap,
+    33→  ChevronRight, CalendarDays, Award, TrendingUp, PieChart as PieChartIcon,
+    34→  Download, Sparkles, BookOpen, Trophy, Palette, HeartHandshake, Compass,
+    35→  Activity, Percent, Hash, RefreshCw, School, Plus, Pencil, Trash2,
+    36→  Upload, X, AlertCircle,
+    37→} from 'lucide-react'
+    38→import {
+    39→  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    40→  PieChart, Pie, Cell, Legend, RadarChart, PolarGrid, PolarAngleAxis,
+    41→  PolarRadiusAxis, Radar,
+    42→} from 'recharts'
+    43→import { toast } from 'sonner'
+    44→import { cn } from '@/lib/utils'
+    45→
+    46→const PIE_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#f43f5e', '#8b5cf6', '#0ea5e9', '#64748b']
+    47→
+    48→const EXAM_TYPES = ['Unit Test', 'Mid Term', 'Final', 'Online'] as const
+    49→
+    50→function fmtDate(iso: string): string {
+    51→  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    52→}
+    53→
+    54→function fmtRange(a: string, b: string): string {
+    55→  const d1 = new Date(a)
+    56→  const d2 = new Date(b)
+    57→  if (d1.getMonth() === d2.getMonth() && d1.getFullYear() === d2.getFullYear()) {
+    58→    return `${d1.getDate()}–${d2.getDate()} ${d1.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}`
+    59→  }
+    60→  return `${fmtDate(a)} → ${fmtDate(b)}`
+    61→}
+    62→
+    63→// ============================================================
+    64→// Cell color for an obtained percentage
+    65→// ============================================================
+    66→function pctColorClass(pct: number): string {
+    67→  if (pct >= 80) return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-semibold'
+    68→  if (pct >= 60) return 'bg-amber-500/15 text-amber-700 dark:text-amber-400 font-semibold'
+    69→  if (pct < 40) return 'bg-rose-500/15 text-rose-700 dark:text-rose-400 font-semibold'
+    70→  return 'bg-muted text-foreground font-medium'
+    71→}
+    72→
+    73→// ============================================================
+    74→// Exam list item (left pane)
+    75→// ============================================================
+    76→function ExamListItem({
+    77→  exam, active, onClick, canEdit, canDelete, onEdit, onDelete,
+    78→}: {
+    79→  exam: Exam
+    80→  active: boolean
+    81→  onClick: () => void
+    82→  canEdit?: boolean
+    83→  canDelete?: boolean
+    84→  onEdit?: () => void
+    85→  onDelete?: () => void
+    86→}) {
+    87→  return (
+    88→    <div
+    89→      onClick={onClick}
+    90→      className={cn(
+    91→        'w-full text-left rounded-xl border p-4 transition-all group cursor-pointer',
+    92→        active
+    93→          ? 'border-primary bg-primary/5 shadow-sm'
+    94→          : 'border-border hover:border-primary/40 hover:bg-accent/40',
+    95→      )}
+    96→    >
+    97→      <div className="flex items-start justify-between gap-2">
+    98→        <div className="flex items-start gap-3 min-w-0">
+    99→          <div className={cn(
+   100→            'size-10 rounded-lg grid place-items-center shrink-0 transition-colors',
+   101→            active ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary group-hover:bg-primary/15',
+   102→          )}>
+   103→            <ClipboardList className="size-5" />
+   104→          </div>
+   105→          <div className="min-w-0">
+   106→            <p className="font-semibold text-sm truncate">{exam.name}</p>
+   107→            <p className="text-[11px] text-muted-foreground mt-0.5">{fmtRange(exam.startDate, exam.endDate)}</p>
+   108→          </div>
+   109→        </div>
+   110→        {active && <ChevronRight className="size-4 text-primary shrink-0 mt-1" />}
+   111→      </div>
+   112→      <div className="flex flex-wrap items-center gap-1.5 mt-3">
+   113→        <Badge variant="outline" className="text-[10px] gap-1">
+   114→          <BookOpen className="size-3" /> {exam.examType}
+   115→        </Badge>
+   116→        {exam.subject && (
+   117→          <Badge variant="outline" className="text-[10px] gap-1">
+   118→            <FileText className="size-3" /> {exam.subject}
+   119→          </Badge>
+   120→        )}
+   121→        <StatusBadge status={exam.status} />
+   122→        <Badge variant="secondary" className="text-[10px] gap-1 ml-auto">
+   123→          <Hash className="size-3" /> {exam.marksCount ?? 0}
+   124→        </Badge>
+   125→      </div>
+   126→      {(canEdit || canDelete) && (
+   127→        <div className="flex items-center justify-end gap-1 mt-2 pt-2 border-t" onClick={(e) => e.stopPropagation()}>
+   128→          {canEdit && (
+   129→            <Button
+   130→              size="sm"
+   131→              variant="ghost"
+   132→              className="h-7 px-2 text-xs"
+   133→              onClick={onEdit}
+   134→              title="Edit exam"
+   135→            >
+   136→              <Pencil className="size-3.5" /> Edit
+   137→            </Button>
+   138→          )}
+   139→          {canDelete && (
+   140→            <Button
+   141→              size="sm"
+   142→              variant="ghost"
+   143→              className="h-7 px-2 text-xs text-rose-600 hover:bg-rose-500/10"
+   144→              onClick={onDelete}
+   145→              title="Delete exam"
+   146→            >
+   147→              <Trash2 className="size-3.5" /> Delete
+   148→            </Button>
+   149→          )}
+   150→        </div>
+   151→      )}
+   152→    </div>
+   153→  )
+   154→}
+   155→
+   156→// ============================================================
+   157→// Inline editable mark cell
+   158→// ============================================================
+   159→function EditableMarkCell({
+   160→  value, maxMarks, loading, onSave,
+   161→}: {
+   162→  value: number | null | undefined
+   163→  maxMarks: number
+   164→  loading?: boolean
+   165→  onSave: (obtained: number) => void
+   166→}) {
+   167→  const [v, setV] = useState(value == null ? '' : String(value))
+   168→  return (
+   169→    <input
+   170→      type="number"
+   171→      value={v}
+   172→      min={0}
+   173→      max={maxMarks}
+   174→      disabled={loading}
+   175→      onChange={(e) => setV(e.target.value)}
+   176→      onBlur={() => {
+   177→        const raw = v.trim()
+   178→        if (raw === '') {
+   179→          // empty → treat as 0 only if it changed from a non-null value
+   180→          if (value != null) onSave(0)
+   181→          return
+   182→        }
+   183→        const n = Number(raw)
+   184→        if (Number.isNaN(n)) return
+   185→        if (n === value) return
+   186→        onSave(n)
+   187→      }}
+   188→      onKeyDown={(e) => {
+   189→        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+   190→      }}
+   191→      className="w-14 text-center text-[11px] tabular-nums rounded border border-input bg-card px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
+   192→    />
+   193→  )
+   194→}
+   195→
+   196→// ============================================================
+   197→// Marks sheet (pivot table)
+   198→// ============================================================
+   199→interface PivotRow {
+   200→  studentId: string
+   201→  studentName: string
+   202→  admissionNo: string
+   203→  className: string
+   204→  cells: Record<string, ExamMark | undefined>
+   205→  total: number
+   206→  maxTotal: number
+   207→  pct: number
+   208→}
+   209→
+   210→function MarksSheetTab({
+   211→  exam, classId, canEnter,
+   212→}: {
+   213→  exam: any
+   214→  classId: string
+   215→  canEnter: boolean
+   216→}) {
+   217→  const user = useStore((s) => s.user)
+   218→  const isParent = user?.role === 'parent'
+   219→  const childIds = isParent ? (user?.childrenStudentIds ?? []) : []
+   220→  const qc = useQueryClient()
+   221→
+   222→  const marksQ = useQuery({
+   223→    queryKey: ['exams', 'marks', exam.id, classId],
+   224→    queryFn: () => api.exams.marks(exam.id, classId || undefined),
+   225→    enabled: !!exam.id,
+   226→  })
+   227→
+   228→  // Load students for the class so we can enter marks even when no marks exist yet
+   229→  const studentsQ = useQuery({
+   230→    queryKey: ['students', 'class', classId],
+   231→    queryFn: () => api.students.list({ classId }),
+   232→    enabled: canEnter && !!classId && (marksQ.data?.length ?? 0) === 0,
+   233→  })
+   234→
+   235→  const allMarks = marksQ.data ?? []
+   236→
+   237→  // Parent: client-side filter to a single selected child. The backend
+   238→  // already scopes the response to all of the parent's children — we just
+   239→  // narrow it further to one child for a cleaner per-child view.
+   240→  const childrenWithMarks = isParent
+   241→    ? childIds
+   242→      .map((id) => {
+   243→        const m = allMarks.find((r) => r.studentId === id)
+   244→        return m ? { id, name: m.studentName } : null
+   245→      })
+   246→      .filter((x): x is { id: string; name: string } => !!x)
+   247→    : []
+   248→
+   249→  const [selectedChildId, setSelectedChildId] = useState<string>('')
+   250→  const effectiveChildId = selectedChildId || (childrenWithMarks[0]?.id ?? '')
+   251→
+   252→  const marks = isParent && effectiveChildId
+   253→    ? allMarks.filter((m) => m.studentId === effectiveChildId)
+   254→    : allMarks
+   255→
+   256→  // eslint-disable-next-line react-hooks/preserve-manual-memoization
+   257→  const { subjects, rows, subjectAverages } = useMemo(() => {
+   258→    const subjectSet = new Map<string, { name: string; max: number }>()
+   259→    for (const m of marks) {
+   260→      if (!subjectSet.has(m.subject)) subjectSet.set(m.subject, { name: m.subject, max: m.maxMarks })
+   261→    }
+   262→
+   263→    // If no marks exist but exam has a subject, use the exam's subject for entry
+   264→    if (subjectSet.size === 0 && exam.subject) {
+   265→      subjectSet.set(exam.subject, { name: exam.subject, max: 100 })
+   266→    }
+   267→
+   268→    const subjects = Array.from(subjectSet.values()).sort((a, b) => a.name.localeCompare(b.name))
+   269→
+   270→    const byStudent = new Map<string, PivotRow>()
+   271→    for (const m of marks) {
+   272→      const existing = byStudent.get(m.studentId)
+   273→      const r: PivotRow = existing ?? {
+   274→        studentId: m.studentId,
+   275→        studentName: m.studentName,
+   276→        admissionNo: m.admissionNo,
+   277→        className: m.className || '-',
+   278→        cells: {},
+   279→        total: 0,
+   280→        maxTotal: 0,
+   281→        pct: 0,
+   282→      }
+   283→      if (!existing) byStudent.set(m.studentId, r)
+   284→      r.cells[m.subject] = m
+   285→      if (m.obtained != null) {
+   286→        r.total += m.obtained
+   287→        r.maxTotal += m.maxMarks
+   288→      }
+   289→    }
+   290→
+   291→    // If no marks exist, build rows from the student list so teachers can enter marks
+   292→    if (byStudent.size === 0 && studentsQ.data && studentsQ.data.length > 0) {
+   293→      for (const s of studentsQ.data) {
+   294→        byStudent.set(s.id, {
+   295→          studentId: s.id,
+   296→          studentName: s.fullName,
+   297→          admissionNo: s.admissionNo,
+   298→          className: s.className || '-',
+   299→          cells: {},
+   300→          total: 0,
+   301→          maxTotal: 0,
+   302→          pct: 0,
+   303→        })
+   304→      }
+   305→    }
+   306→
+   307→    const rows = Array.from(byStudent.values())
+   308→      .map((r) => ({ ...r, pct: r.maxTotal ? Math.round((r.total / r.maxTotal) * 100) : 0 }))
+   309→      .sort((a, b) => b.pct - a.pct || a.studentName.localeCompare(b.studentName))
+   310→
+   311→    const subjectAverages = subjects.map((s) => {
+   312→      const vals = marks.filter((m) => m.subject === s.name && m.obtained != null)
+   313→      const sum = vals.reduce((acc, m) => acc + (m.obtained ?? 0), 0)
+   314→      const pct = vals.length ? Math.round((sum / (vals.length * s.max)) * 100) : 0
+   315→      return { name: s.name, avg: vals.length ? Math.round((sum / vals.length) * 10) / 10 : 0, pct, count: vals.length }
+   316→    })
+   317→
+   318→    return { subjects, rows, subjectAverages }
+   319→  }, [marks, exam.subject, studentsQ.data])
+   320→
+   321→  // Edit mode for marks entry (teachers/admins only). Auto-enable when no marks exist.
+   322→  const [editMode, setEditMode] = useState(marks.length === 0 && canEnter)
+   323→
+   324→  const enterMarksMut = useMutation({
+   325→    mutationFn: (data: { examId: string; studentId: string; subject: string; maxMarks: number; obtained: number }) =>
+   326→      api.exams.enterMarks(data),
+   327→    onSuccess: (_data, vars) => {
+   328→      qc.invalidateQueries({ queryKey: ['exams', 'marks', exam.id, classId] })
+   329→      qc.invalidateQueries({ queryKey: ['exams', 'list'] })
+   330→      toast.success(`Marks saved · ${vars.subject}: ${vars.obtained}/${vars.maxMarks}`)
+   331→    },
+   332→    onError: (e: any) => toast.error('Failed to save marks: ' + e.message),
+   333→  })
+   334→
+   335→  if (marksQ.isLoading) {
+   336→    return (
+   337→      <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+   338→    )
+   339→  }
+   340→  if (marksQ.isError) {
+   341→    return <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load marks" description="Please retry." /></CardContent></Card>
+   342→  }
+   343→  if (marks.length === 0 && !canEnter) {
+   344→    return (
+   345→      <Card><CardContent className="py-2">
+   346→        <EmptyState icon={FileBarChart2} title="No marks recorded" description="Marks for this exam & class have not been entered yet." />
+   347→      </CardContent></Card>
+   348→    )
+   349→  }
+   350→
+   351→  return (
+   352→    <Card className="overflow-hidden">
+   353→      <CardHeader className="pb-3">
+   354→        <div className="flex flex-wrap items-center justify-between gap-3">
+   355→          <div>
+   356→            <CardTitle className="text-base flex items-center gap-2"><FileBarChart2 className="size-4 text-primary" /> Marks Sheet</CardTitle>
+   357→            <CardDescription className="text-xs mt-0.5">
+   358→              {exam.name} · {rows.length} students · {subjects.length} subjects
+   359→            </CardDescription>
+   360→          </div>
+   361→          <div className="flex items-center gap-2">
+   362→            <Badge variant="secondary" className="text-[11px] gap-1">
+   363→              <Award className="size-3" /> Avg {subjectAverages.length ? Math.round(subjectAverages.reduce((a, s) => a + s.pct, 0) / subjectAverages.length) : 0}%
+   364→            </Badge>
+   365→            {canEnter && (
+   366→              <Button
+   367→                size="sm"
+   368→                variant={editMode ? 'default' : 'outline'}
+   369→                onClick={() => setEditMode((m) => !m)}
+   370→                className="h-8 text-xs"
+   371→              >
+   372→                <Pencil className="size-3.5" />
+   373→                {editMode ? 'Done Editing' : 'Edit Mode'}
+   374→              </Button>
+   375→            )}
+   376→          </div>
+   377→        </div>
+   378→        {isParent && childrenWithMarks.length > 1 && (
+   379→          <div className="flex items-center gap-2 mt-3 pt-3 border-t">
+   380→            <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+   381→              <GraduationCap className="size-3.5" /> Child
+   382→            </span>
+   383→            <Select value={effectiveChildId} onValueChange={setSelectedChildId}>
+   384→              <SelectTrigger size="sm" className="min-w-[220px]">
+   385→                <SelectValue placeholder="Select child" />
+   386→              </SelectTrigger>
+   387→              <SelectContent>
+   388→                {childrenWithMarks.map((c) => (
+   389→                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+   390→                ))}
+   391→              </SelectContent>
+   392→            </Select>
+   393→          </div>
+   394→        )}
+   395→        {canEnter && editMode && (
+   396→          <div className="mt-3 pt-3 border-t text-xs text-muted-foreground flex items-center gap-2">
+   397→            <Sparkles className="size-3.5 text-primary" />
+   398→            Click any marks cell to edit. Press <kbd className="px-1.5 py-0.5 rounded border bg-muted text-[10px]">Enter</kbd> or click away to save.
+   399→          </div>
+   400→        )}
+   401→      </CardHeader>
+   402→      <CardContent className="px-0 pb-0">
+   403→        <div className="max-h-[60vh] overflow-auto scroll-thin border-t">
+   404→          <Table className="min-w-[700px]">
+   405→            <TableHeader className="sticky top-0 bg-card z-10">
+   406→              <TableRow>
+   407→                <TableHead className="pl-6 sticky left-0 bg-card z-20 min-w-[180px]">Student</TableHead>
+   408→                {subjects.map((s) => (
+   409→                  <TableHead key={s.name} className="text-center min-w-[90px]">
+   410→                    <div className="flex flex-col items-center">
+   411→                      <span className="text-[11px]">{s.name}</span>
+   412→                      <span className="text-[10px] text-muted-foreground tabular-nums">/{s.max}</span>
+   413→                    </div>
+   414→                  </TableHead>
+   415→                ))}
+   416→                <TableHead className="text-right pr-6 min-w-[100px]">Total</TableHead>
+   417→                <TableHead className="text-right pr-6 min-w-[80px]">%</TableHead>
+   418→              </TableRow>
+   419→            </TableHeader>
+   420→            <TableBody>
+   421→              {rows.map((r) => (
+   422→                <TableRow key={r.studentId}>
+   423→                  <TableCell className="pl-6 sticky left-0 bg-card z-10">
+   424→                    <div className="flex items-center gap-2.5 min-w-0">
+   425→                      <div className="size-7 rounded-full bg-primary/10 text-primary grid place-items-center text-[10px] font-bold shrink-0">
+   426→                        {r.studentName.split(' ').map((w) => w[0]).slice(0, 2).join('')}
+   427→                      </div>
+   428→                      <div className="min-w-0">
+   429→                        <p className="font-medium text-sm truncate">{r.studentName}</p>
+   430→                        <p className="text-[11px] text-muted-foreground tabular-nums">{r.admissionNo} · {r.className}</p>
+   431→                      </div>
+   432→                    </div>
+   433→                  </TableCell>
+   434→                  {subjects.map((s) => {
+   435→                    const cell = r.cells[s.name]
+   436→                    const obtained = cell?.obtained
+   437→                    const pct = cell && cell.maxMarks ? Math.round(((obtained ?? 0) / cell.maxMarks) * 100) : 0
+   438→                    if (canEnter && editMode) {
+   439→                      return (
+   440→                        <TableCell key={s.name} className="text-center">
+   441→                          <div className="inline-flex">
+   442→                            <EditableMarkCell
+   443→                              key={`${r.studentId}-${s.name}-${obtained ?? 'null'}`}
+   444→                              value={obtained}
+   445→                              maxMarks={s.max}
+   446→                              loading={enterMarksMut.isPending}
+   447→                              onSave={(newObtained) =>
+   448→                                enterMarksMut.mutate({
+   449→                                  examId: exam.id,
+   450→                                  studentId: r.studentId,
+   451→                                  subject: s.name,
+   452→                                  maxMarks: s.max,
+   453→                                  obtained: newObtained,
+   454→                                })
+   455→                              }
+   456→                            />
+   457→                          </div>
+   458→                        </TableCell>
+   459→                      )
+   460→                    }
+   461→                    return (
+   462→                      <TableCell key={s.name} className="text-center">
+   463→                        {cell ? (
+   464→                          <span className={cn(
+   465→                            'inline-flex items-center justify-center min-w-[44px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   466→                            obtained == null ? 'bg-muted/50 text-muted-foreground' : pctColorClass(pct),
+   467→                          )} title={cell.grade ? `Grade: ${cell.grade}` : undefined}>
+   468→                            {obtained == null ? '—' : obtained}
+   469→                          </span>
+   470→                        ) : (
+   471→                          <span className="text-muted-foreground/40 text-xs">—</span>
+   472→                        )}
+   473→                      </TableCell>
+   474→                    )
+   475→                  })}
+   476→                  <TableCell className="text-right pr-6 font-semibold tabular-nums">
+   477→                    {r.total}<span className="text-muted-foreground text-[11px] font-normal">/{r.maxTotal}</span>
+   478→                  </TableCell>
+   479→                  <TableCell className="text-right pr-6">
+   480→                    <span className={cn(
+   481→                      'inline-flex items-center justify-center min-w-[44px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   482→                      pctColorClass(r.pct),
+   483→                    )}>{r.pct}%</span>
+   484→                  </TableCell>
+   485→                </TableRow>
+   486→              ))}
+   487→            </TableBody>
+   488→            <TableFooter className="sticky bottom-0 bg-muted/40 z-10">
+   489→              <TableRow className="border-t font-semibold">
+   490→                <TableCell className="pl-6 sticky left-0 bg-muted/40 z-10">
+   491→                  <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
+   492→                    <TrendingUp className="size-3.5" /> Subject Avg
+   493→                  </span>
+   494→                </TableCell>
+   495→                {subjects.map((s) => {
+   496→                  const avg = subjectAverages.find((a) => a.name === s.name)
+   497→                  const pct = avg?.pct ?? 0
+   498→                  return (
+   499→                    <TableCell key={s.name} className="text-center">
+   500→                      <span className={cn(
+   501→                        'inline-flex items-center justify-center min-w-[44px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   502→                        pctColorClass(pct),
+   503→                      )}>
+   504→                        {avg?.avg ?? 0}
+   505→                      </span>
+   506→                    </TableCell>
+   507→                  )
+   508→                })}
+   509→                <TableCell className="text-right pr-6 text-muted-foreground">—</TableCell>
+   510→                <TableCell className="text-right pr-6 text-muted-foreground">—</TableCell>
+   511→              </TableRow>
+   512→            </TableFooter>
+   513→          </Table>
+   514→        </div>
+   515→      </CardContent>
+   516→    </Card>
+   517→  )
+   518→}
+   519→
+   520→// ============================================================
+   521→// Progress card (holistic report card)
+   522→// ============================================================
+   523→const CO_SCHOLASTIC_AREAS = [
+   524→  { key: 'sports', label: 'Sports & Games', icon: Trophy },
+   525→  { key: 'arts', label: 'Art & Music', icon: Palette },
+   526→  { key: 'behavior', label: 'Behavior & Conduct', icon: HeartHandshake },
+   527→  { key: 'lifeSkills', label: 'Life Skills', icon: Compass },
+   528→] as const
+   529→
+   530→const CO_GRADES = ['A+', 'A', 'B+', 'B', 'C', 'D'] as const
+   531→
+   532→function ProgressCardTab({
+   533→  exam, classId,
+   534→}: {
+   535→  exam: Exam
+   536→  classId: string
+   537→}) {
+   538→  const marksQ = useQuery({
+   539→    queryKey: ['exams', 'marks', exam.id, classId],
+   540→    queryFn: () => api.exams.marks(exam.id, classId || undefined),
+   541→    enabled: !!exam.id,
+   542→  })
+   543→  const marks = marksQ.data ?? []
+   544→
+   545→  // Unique students from marks
+   546→  const studentsInExam = useMemo(() => {
+   547→    const map = new Map<string, { id: string; name: string; admissionNo: string; className: string }>()
+   548→    for (const m of marks) {
+   549→      if (!map.has(m.studentId)) {
+   550→        map.set(m.studentId, { id: m.studentId, name: m.studentName, admissionNo: m.admissionNo, className: m.className || '-' })
+   551→      }
+   552→    }
+   553→    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
+   554→  }, [marks])
+   555→
+   556→  // Also fetch full student records (for attendance %, gender, etc.)
+   557→  const studentsQ = useQuery({
+   558→    queryKey: ['students', 'list', 'progress', classId],
+   559→    queryFn: () => api.students.list(classId ? { classId } : {}),
+   560→    enabled: !!exam.id,
+   561→  })
+   562→  const allStudents: Student[] = studentsQ.data ?? []
+   563→
+   564→  const [studentId, setStudentId] = useState<string>('')
+   565→  const effectiveStudentId = studentId || (studentsInExam[0]?.id ?? '')
+   566→  const studentMeta = studentsInExam.find((s) => s.id === effectiveStudentId) || null
+   567→  const studentFull = allStudents.find((s) => s.id === effectiveStudentId) || null
+   568→
+   569→  // Local co-scholastic grades
+   570→  const [coGrades, setCoGrades] = useState<Record<string, string>>({
+   571→    sports: 'A', arts: 'A+', behavior: 'A+', lifeSkills: 'A',
+   572→  })
+   573→
+   574→  const studentMarks = useMemo(
+   575→    () => marks.filter((m) => m.studentId === effectiveStudentId),
+   576→    [marks, effectiveStudentId],
+   577→  )
+   578→
+   579→  const radarData = useMemo(() => {
+   580→    return studentMarks.map((m) => ({
+   581→      subject: m.subject.length > 8 ? m.subject.slice(0, 8) + '…' : m.subject,
+   582→      score: m.maxMarks ? Math.round(((m.obtained ?? 0) / m.maxMarks) * 100) : 0,
+   583→      fullMark: 100,
+   584→    }))
+   585→  }, [studentMarks])
+   586→
+   587→  const totalObtained = studentMarks.reduce((acc, m) => acc + (m.obtained ?? 0), 0)
+   588→  const totalMax = studentMarks.reduce((acc, m) => acc + m.maxMarks, 0)
+   589→  const overallPct = totalMax ? Math.round((totalObtained / totalMax) * 100) : 0
+   590→  const overallGrade = overallPct >= 90 ? 'A+' : overallPct >= 80 ? 'A' : overallPct >= 70 ? 'B+' : overallPct >= 60 ? 'B' : overallPct >= 50 ? 'C' : overallPct >= 40 ? 'D' : 'F'
+   591→
+   592→  const attendancePct = studentFull?.attendancePercent ?? 0
+   593→
+   594→  if (marksQ.isLoading) {
+   595→    return <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+   596→  }
+   597→  if (studentsInExam.length === 0) {
+   598→    return (
+   599→      <Card><CardContent className="py-2">
+   600→        <EmptyState icon={FileText} title="No marks recorded" description="Generate marks for this exam to view progress cards." />
+   601→      </CardContent></Card>
+   602→    )
+   603→  }
+   604→
+   605→  return (
+   606→    <div className="space-y-4">
+   607→      {/* Student selector */}
+   608→      <Card className="p-3">
+   609→        <div className="flex flex-wrap items-center justify-between gap-3">
+   610→          <div className="flex items-center gap-2">
+   611→            <FileText className="size-4 text-primary" />
+   612→            <span className="text-sm font-medium">Select Student</span>
+   613→          </div>
+   614→          <Select value={effectiveStudentId} onValueChange={setStudentId}>
+   615→            <SelectTrigger size="sm" className="min-w-[260px]">
+   616→              <SelectValue placeholder="Choose a student" />
+   617→            </SelectTrigger>
+   618→            <SelectContent>
+   619→              {studentsInExam.map((s) => (
+   620→                <SelectItem key={s.id} value={s.id}>
+   621→                  {s.name} · {s.admissionNo}
+   622→                </SelectItem>
+   623→              ))}
+   624→            </SelectContent>
+   625→          </Select>
+   626→        </div>
+   627→      </Card>
+   628→
+   629→      {/* Printable progress card */}
+   630→      <Card className="overflow-hidden border-primary/20">
+   631→        {/* School header */}
+   632→        <div className="bg-gradient-to-br from-primary to-emerald-600 text-primary-foreground p-6">
+   633→          <div className="flex flex-wrap items-center justify-between gap-4">
+   634→            <div className="flex items-center gap-3">
+   635→              <div className="size-12 rounded-xl bg-primary-foreground/15 grid place-items-center">
+   636→                <School className="size-6" />
+   637→              </div>
+   638→              <div>
+   639→                <h3 className="text-lg font-bold leading-tight">Vidyamatrix International School</h3>
+   640→                <p className="text-xs opacity-90">Holistic Progress Card · Academic Year 2026–27</p>
+   641→              </div>
+   642→            </div>
+   643→            <div className="text-right">
+   644→              <p className="text-xs opacity-80 uppercase tracking-wide">Examination</p>
+   645→              <p className="font-semibold text-sm">{exam.name}</p>
+   646→              <p className="text-[11px] opacity-80">{fmtRange(exam.startDate, exam.endDate)}</p>
+   647→            </div>
+   648→          </div>
+   649→        </div>
+   650→
+   651→        {/* Student info */}
+   652→        <div className="px-6 py-4 border-b bg-muted/20 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+   653→          <div>
+   654→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Student</p>
+   655→            <p className="font-semibold">{studentMeta?.name ?? '-'}</p>
+   656→          </div>
+   657→          <div>
+   658→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Admission No.</p>
+   659→            <p className="font-semibold tabular-nums">{studentMeta?.admissionNo ?? '-'}</p>
+   660→          </div>
+   661→          <div>
+   662→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Class</p>
+   663→            <p className="font-semibold">{studentMeta?.className ?? studentFull?.className ?? '-'}</p>
+   664→          </div>
+   665→          <div>
+   666→            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Section</p>
+   667→            <p className="font-semibold">{studentFull?.sectionName ?? '-'}</p>
+   668→          </div>
+   669→        </div>
+   670→
+   671→        <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
+   672→          {/* Academic marks table */}
+   673→          <div className="lg:col-span-2 p-6 border-b lg:border-b-0 lg:border-r">
+   674→            <div className="flex items-center gap-2 mb-3">
+   675→              <BookOpen className="size-4 text-primary" />
+   676→              <h4 className="text-sm font-semibold">Scholastic Area</h4>
+   677→              <Badge variant="secondary" className="text-[10px] ml-auto">{studentMarks.length} subjects</Badge>
+   678→            </div>
+   679→            <Table>
+   680→              <TableHeader>
+   681→                <TableRow>
+   682→                  <TableHead className="pl-0">Subject</TableHead>
+   683→                  <TableHead className="text-center">Max</TableHead>
+   684→                  <TableHead className="text-center">Obtained</TableHead>
+   685→                  <TableHead className="text-center">%</TableHead>
+   686→                  <TableHead className="text-right pr-0">Grade</TableHead>
+   687→                </TableRow>
+   688→              </TableHeader>
+   689→              <TableBody>
+   690→                {studentMarks.map((m) => {
+   691→                  const pct = m.maxMarks ? Math.round(((m.obtained ?? 0) / m.maxMarks) * 100) : 0
+   692→                  return (
+   693→                    <TableRow key={m.id}>
+   694→                      <TableCell className="pl-0 font-medium text-sm">{m.subject}</TableCell>
+   695→                      <TableCell className="text-center text-xs tabular-nums text-muted-foreground">{m.maxMarks}</TableCell>
+   696→                      <TableCell className="text-center text-sm tabular-nums">{m.obtained ?? '—'}</TableCell>
+   697→                      <TableCell className="text-center">
+   698→                        <span className={cn(
+   699→                          'inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   700→                          pctColorClass(pct),
+   701→                        )}>{pct}%</span>
+   702→                      </TableCell>
+   703→                      <TableCell className="text-right pr-0">
+   704→                        <Badge variant="outline" className="text-[11px] tabular-nums">{m.grade ?? '-'}</Badge>
+   705→                      </TableCell>
+   706→                    </TableRow>
+   707→                  )
+   708→                })}
+   709→              </TableBody>
+   710→              <TableFooter>
+   711→                <TableRow>
+   712→                  <TableCell className="pl-0 font-semibold text-sm" colSpan={2}>Total</TableCell>
+   713→                  <TableCell className="text-center font-semibold tabular-nums text-sm">{totalObtained}/{totalMax}</TableCell>
+   714→                  <TableCell className="text-center">
+   715→                    <span className={cn(
+   716→                      'inline-flex items-center justify-center min-w-[40px] px-1.5 py-0.5 rounded text-[11px] tabular-nums',
+   717→                      pctColorClass(overallPct),
+   718→                    )}>{overallPct}%</span>
+   719→                  </TableCell>
+   720→                  <TableCell className="text-right pr-0">
+   721→                    <Badge className="text-[11px] tabular-nums">{overallGrade}</Badge>
+   722→                  </TableCell>
+   723→                </TableRow>
+   724→              </TableFooter>
+   725→            </Table>
+   726→          </div>
+   727→
+   728→          {/* Radar chart */}
+   729→          <div className="p-6">
+   730→            <div className="flex items-center gap-2 mb-3">
+   731→              <Activity className="size-4 text-primary" />
+   732→              <h4 className="text-sm font-semibold">Subject Performance</h4>
+   733→            </div>
+   734→            {radarData.length === 0 ? (
+   735→              <EmptyState icon={Activity} title="No data" />
+   736→            ) : (
+   737→              <ResponsiveContainer width="100%" height={240}>
+   738→                <RadarChart data={radarData} outerRadius="75%">
+   739→                  <PolarGrid stroke="var(--border)" />
+   740→                  <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} />
+   741→                  <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }} />
+   742→                  <Radar name="Score" dataKey="score" stroke="#10b981" fill="#10b981" fillOpacity={0.35} strokeWidth={2} />
+   743→                  <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v: any) => `${v}%`} />
+   744→                </RadarChart>
+   745→              </ResponsiveContainer>
+   746→            )}
+   747→            <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+   748→              <div className="rounded-lg border p-2">
+   749→                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Attendance</p>
+   750→                <p className="font-bold text-lg tabular-nums">{attendancePct}%</p>
+   751→              </div>
+   752→              <div className="rounded-lg border p-2">
+   753→                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Overall</p>
+   754→                <p className="font-bold text-lg tabular-nums">{overallPct}%</p>
+   755→              </div>
+   756→            </div>
+   757→          </div>
+   758→        </div>
+   759→
+   760→        {/* Co-scholastic */}
+   761→        <div className="p-6 border-t bg-muted/10">
+   762→          <div className="flex items-center gap-2 mb-3">
+   763→            <Sparkles className="size-4 text-primary" />
+   764→            <h4 className="text-sm font-semibold">Co-scholastic Area</h4>
+   765→            <span className="text-[11px] text-muted-foreground ml-auto">Graded on a 5-point scale (A+ to D)</span>
+   766→          </div>
+   767→          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+   768→            {CO_SCHOLASTIC_AREAS.map((area) => {
+   769→              const Icon = area.icon
+   770→              return (
+   771→                <div key={area.key} className="rounded-lg border p-3 bg-card">
+   772→                  <div className="flex items-center gap-2 mb-2">
+   773→                    <div className="size-7 rounded-lg bg-primary/10 text-primary grid place-items-center">
+   774→                      <Icon className="size-4" />
+   775→                    </div>
+   776→                    <span className="text-xs font-medium">{area.label}</span>
+   777→                  </div>
+   778→                  <Select
+   779→                    value={coGrades[area.key]}
+   780→                    onValueChange={(v) => setCoGrades((prev) => ({ ...prev, [area.key]: v }))}
+   781→                  >
+   782→                    <SelectTrigger size="sm" className="w-full">
+   783→                      <SelectValue />
+   784→                    </SelectTrigger>
+   785→                    <SelectContent>
+   786→                      {CO_GRADES.map((g) => (
+   787→                        <SelectItem key={g} value={g}>{g}</SelectItem>
+   788→                      ))}
+   789→                    </SelectContent>
+   790→                  </Select>
+   791→                </div>
+   792→              )
+   793→            })}
+   794→          </div>
+   795→        </div>
+   796→
+   797→        {/* Footer */}
+   798→        <div className="p-6 border-t bg-card flex flex-wrap items-center justify-between gap-3">
+   799→          <div className="text-[11px] text-muted-foreground">
+   800→            <p>This is a system-generated progress card based on examination data.</p>
+   801→            <p className="mt-0.5">Generated on {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.</p>
+   802→          </div>
+   803→          <Button
+   804→            size="sm"
+   805→            onClick={() => toast.success('Generating PDF…', {
+   806→              description: `Progress card for ${studentMeta?.name ?? 'student'} is being prepared.`,
+   807→            })}
+   808→          >
+   809→            <Download className="size-4" /> Download PDF
+   810→          </Button>
+   811→        </div>
+   812→      </Card>
+   813→    </div>
+   814→  )
+   815→}
+   816→
+   817→// ============================================================
+   818→// Analysis tab
+   819→// ============================================================
+   820→function AnalysisTab({
+   821→  exam, classId,
+   822→}: {
+   823→  exam: Exam
+   824→  classId: string
+   825→}) {
+   826→  const marksQ = useQuery({
+   827→    queryKey: ['exams', 'marks', exam.id, classId],
+   828→    queryFn: () => api.exams.marks(exam.id, classId || undefined),
+   829→    enabled: !!exam.id,
+   830→  })
+   831→  const marks = marksQ.data ?? []
+   832→
+   833→  const { subjectAverages, gradeDist } = useMemo(() => {
+   834→    // Subject averages
+   835→    const bySubject = new Map<string, { sum: number; count: number; max: number }>()
+   836→    for (const m of marks) {
+   837→      if (m.obtained == null) continue
+   838→      const e = bySubject.get(m.subject) || { sum: 0, count: 0, max: m.maxMarks }
+   839→      e.sum += m.obtained
+   840→      e.count += 1
+   841→      e.max = m.maxMarks
+   842→      bySubject.set(m.subject, e)
+   843→    }
+   844→    const subjectAverages = Array.from(bySubject.entries())
+   845→      .map(([name, v]) => ({
+   846→        subject: name,
+   847→        average: v.count ? Math.round((v.sum / v.count) * 10) / 10 : 0,
+   848→        pct: v.count ? Math.round((v.sum / (v.count * v.max)) * 100) : 0,
+   849→      }))
+   850→      .sort((a, b) => b.pct - a.pct)
+   851→
+   852→    // Grade distribution
+   853→    const gradeOrder = ['A+', 'A', 'B+', 'B', 'C', 'D', 'F']
+   854→    const counts = new Map<string, number>(gradeOrder.map((g) => [g, 0]))
+   855→    for (const m of marks) {
+   856→      const g = (m.grade || 'N/A').trim()
+   857→      if (counts.has(g)) counts.set(g, (counts.get(g) ?? 0) + 1)
+   858→    }
+   859→    const gradeDist = gradeOrder
+   860→      .map((g) => ({ label: g, value: counts.get(g) ?? 0 }))
+   861→      .filter((x) => x.value > 0)
+   862→
+   863→    return { subjectAverages, gradeDist }
+   864→  }, [marks])
+   865→
+   866→  if (marksQ.isLoading) {
+   867→    return <Card><CardContent><Skeleton className="h-96 w-full" /></CardContent></Card>
+   868→  }
+   869→  if (marksQ.isError) {
+   870→    return <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load analysis" description="Please retry." /></CardContent></Card>
+   871→  }
+   872→  if (marks.length === 0) {
+   873→    return (
+   874→      <Card><CardContent className="py-2">
+   875→        <EmptyState icon={PieChartIcon} title="No data for analysis" description="Enter marks for this exam to enable analytics." />
+   876→      </CardContent></Card>
+   877→    )
+   878→  }
+   879→
+   880→  const totalMarks = marks.length
+   881→  const passedCount = marks.filter((m) => (m.obtained ?? 0) / m.maxMarks >= 0.4).length
+   882→  const passRate = totalMarks ? Math.round((passedCount / totalMarks) * 100) : 0
+   883→  const classAvg = subjectAverages.length
+   884→    ? Math.round(subjectAverages.reduce((a, s) => a + s.pct, 0) / subjectAverages.length)
+   885→    : 0
+   886→
+   887→  return (
+   888→    <div className="space-y-4">
+   889→      {/* Summary strip */}
+   890→      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+   891→        <Card className="p-3">
+   892→          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total Entries</p>
+   893→          <p className="text-xl font-bold tabular-nums">{totalMarks}</p>
+   894→        </Card>
+   895→        <Card className="p-3">
+   896→          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Subjects</p>
+   897→          <p className="text-xl font-bold tabular-nums">{subjectAverages.length}</p>
+   898→        </Card>
+   899→        <Card className="p-3">
+   900→          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Class Average</p>
+   901→          <p className="text-xl font-bold tabular-nums">{classAvg}%</p>
+   902→        </Card>
+   903→        <Card className="p-3">
+   904→          <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pass Rate</p>
+   905→          <p className="text-xl font-bold tabular-nums text-emerald-600">{passRate}%</p>
+   906→        </Card>
+   907→      </div>
+   908→
+   909→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   910→        {/* Subject averages bar */}
+   911→        <Card>
+   912→          <CardHeader className="pb-2">
+   913→            <CardTitle className="text-sm font-medium flex items-center gap-2">
+   914→              <TrendingUp className="size-4 text-primary" /> Subject-wise Class Averages
+   915→            </CardTitle>
+   916→          </CardHeader>
+   917→          <CardContent>
+   918→            <ResponsiveContainer width="100%" height={300}>
+   919→              <BarChart data={subjectAverages} margin={{ left: -10, right: 8, top: 8 }}>
+   920→                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+   921→                <XAxis dataKey="subject" tick={{ fontSize: 10 }} stroke="var(--muted-foreground)" interval={0} angle={-15} textAnchor="end" height={50} />
+   922→                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="var(--muted-foreground)" unit="%" />
+   923→                <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} formatter={(v: any) => `${v}%`} />
+   924→                <Bar dataKey="pct" fill="#10b981" radius={[4, 4, 0, 0]} name="Average %" />
+   925→              </BarChart>
+   926→            </ResponsiveContainer>
+   927→          </CardContent>
+   928→        </Card>
+   929→
+   930→        {/* Grade distribution pie */}
+   931→        <Card>
+   932→          <CardHeader className="pb-2">
+   933→            <CardTitle className="text-sm font-medium flex items-center gap-2">
+   934→              <PieChartIcon className="size-4 text-primary" /> Grade Distribution
+   935→            </CardTitle>
+   936→          </CardHeader>
+   937→          <CardContent>
+   938→            <ResponsiveContainer width="100%" height={300}>
+   939→              <PieChart>
+   940→                <Pie data={gradeDist} dataKey="value" nameKey="label" cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={3}>
+   941→                  {gradeDist.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+   942→                </Pie>
+   943→                <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
+   944→                <Legend wrapperStyle={{ fontSize: 12 }} />
+   945→              </PieChart>
+   946→            </ResponsiveContainer>
+   947→          </CardContent>
+   948→        </Card>
+   949→      </div>
+   950→    </div>
+   951→  )
+   952→}
+   953→
+   954→// ============================================================
+   955→// Create / Edit Exam dialog
+   956→// ============================================================
+   957→function ExamDialog({
+   958→  mode, target, loading, onClose, onSubmit, classes,
+   959→}: {
+   960→  mode: 'create' | 'edit'
+   961→  target?: any
+   962→  loading: boolean
+   963→  onClose: () => void
+   964→  onSubmit: (data: any) => void
+   965→  classes: any[]
+   966→}) {
+   967→  const [name, setName] = useState(target?.name ?? '')
+   968→  const [examType, setExamType] = useState(target?.examType ?? 'Unit Test')
+   969→  const [startDate, setStartDate] = useState(target ? target.startDate.slice(0, 10) : '')
+   970→  const [endDate, setEndDate] = useState(target ? target.endDate.slice(0, 10) : '')
+   971→  const [classId, setClassId] = useState(target?.classId ?? '')
+   972→  const [subject, setSubject] = useState(target?.subject ?? '')
+   973→  const [status, setStatus] = useState(target?.status ?? 'Scheduled')
+   974→  const [paperUrl, setPaperUrl] = useState(target?.paperUrl ?? '')
+   975→
+   976→  // Get subjects for selected class
+   977→  const selectedClass = classes.find((c) => c.id === classId)
+   978→  const classSubjects = selectedClass?.subjects ?? []
+   979→
+   980→  const valid = name.trim() && startDate && endDate && new Date(endDate) >= new Date(startDate)
+   981→
+   982→  const handlePaperUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+   983→    const file = e.target.files?.[0]
+   984→    if (file) {
+   985→      // For demo — store filename as URL (in production this would upload to S3/OSS)
+   986→      setPaperUrl(`/uploads/exam-papers/${file.name}`)
+   987→      toast.success(`Paper uploaded: ${file.name}`)
+   988→    }
+   989→  }
+   990→
+   991→  return (
+   992→    <Dialog open onOpenChange={onClose}>
+   993→      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto scroll-thin">
+   994→        <DialogHeader>
+   995→          <DialogTitle className="flex items-center gap-2">
+   996→            <ClipboardList className="size-5 text-primary" />
+   997→            {mode === 'create' ? 'New Exam' : 'Edit Exam'}
+   998→          </DialogTitle>
+   999→        </DialogHeader>
+  1000→        <div className="space-y-4 py-2">
+  1001→          {/* Exam Name */}
+  1002→          <div className="space-y-1.5">
+  1003→            <Label htmlFor="exam-name">Exam Name *</Label>
+  1004→            <Input id="exam-name" placeholder="e.g. First Unit Test - Mathematics" value={name} onChange={(e) => setName(e.target.value)} />
+  1005→          </div>
+  1006→
+  1007→          {/* Class + Subject row */}
+  1008→          <div className="grid grid-cols-2 gap-3">
+  1009→            <div className="space-y-1.5">
+  1010→              <Label>Class *</Label>
+  1011→              <Select value={classId} onValueChange={(v) => { setClassId(v); setSubject('') }}>
+  1012→                <SelectTrigger className="w-full"><SelectValue placeholder="Select class" /></SelectTrigger>
+  1013→                <SelectContent>
+  1014→                  {classes.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+  1015→                </SelectContent>
+  1016→              </Select>
+  1017→            </div>
+  1018→            <div className="space-y-1.5">
+  1019→              <Label>Subject *</Label>
+  1020→              {classSubjects.length > 0 ? (
+  1021→                <Select value={subject} onValueChange={setSubject}>
+  1022→                  <SelectTrigger className="w-full"><SelectValue placeholder="Select subject" /></SelectTrigger>
+  1023→                  <SelectContent>
+  1024→                    {classSubjects.map((s) => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
+  1025→                  </SelectContent>
+  1026→                </Select>
+  1027→              ) : (
+  1028→                <Input placeholder="Select class first" disabled />
+  1029→              )}
+  1030→            </div>
+  1031→          </div>
+  1032→
+  1033→          {/* Exam Type + Status row */}
+  1034→          <div className="grid grid-cols-2 gap-3">
+  1035→            <div className="space-y-1.5">
+  1036→              <Label>Exam Type</Label>
+  1037→              <Select value={examType} onValueChange={setExamType}>
+  1038→                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1039→                <SelectContent>
+  1040→                  {EXAM_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+  1041→                </SelectContent>
+  1042→              </Select>
+  1043→            </div>
+  1044→            <div className="space-y-1.5">
+  1045→              <Label>Status</Label>
+  1046→              <Select value={status} onValueChange={setStatus}>
+  1047→                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+  1048→                <SelectContent>
+  1049→                  <SelectItem value="Scheduled">Scheduled</SelectItem>
+  1050→                  <SelectItem value="Ongoing">Ongoing</SelectItem>
+  1051→                  <SelectItem value="Completed">Completed</SelectItem>
+  1052→                </SelectContent>
+  1053→              </Select>
+  1054→            </div>
+  1055→          </div>
+  1056→
+  1057→          {/* Date range */}
+  1058→          <div className="grid grid-cols-2 gap-3">
+  1059→            <div className="space-y-1.5">
+  1060→              <Label htmlFor="exam-start">Start Date</Label>
+  1061→              <Input id="exam-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+  1062→            </div>
+  1063→            <div className="space-y-1.5">
+  1064→              <Label htmlFor="exam-end">End Date</Label>
+  1065→              <Input id="exam-end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+  1066→            </div>
+  1067→          </div>
+  1068→
+  1069→          {/* Exam paper upload */}
+  1070→          <div className="space-y-1.5">
+  1071→            <Label>Exam Paper (optional)</Label>
+  1072→            <div className="flex items-center gap-2">
+  1073→              <label className="flex-1 cursor-pointer">
+  1074→                <div className="flex items-center justify-center gap-2 h-10 rounded-md border border-dashed border-border hover:border-primary hover:bg-primary/5 transition-colors text-sm text-muted-foreground">
+  1075→                  <Upload className="size-4" />
+  1076→                  {paperUrl ? paperUrl.split('/').pop() : 'Click to upload exam paper'}
+  1077→                </div>
+  1078→                <input type="file" accept=".pdf,.doc,.docx,.jpg,.png" className="hidden" onChange={handlePaperUpload} />
+  1079→              </label>
+  1080→              {paperUrl && (
+  1081→                <Button size="sm" variant="ghost" onClick={() => setPaperUrl('')}>
+  1082→                  <X className="size-4" />
+  1083→                </Button>
+  1084→              )}
+  1085→            </div>
+  1086→          </div>
+  1087→        </div>
+  1088→
+  1089→        {/* Status hint */}
+  1090→        {status === 'Completed' && (
+  1091→          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+  1092→            <CheckCircle2 className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+  1093→            <p className="text-xs text-emerald-700 dark:text-emerald-400">
+  1094→              When status is "Completed", teachers can enter marks for <strong>{subject || 'the subject'}</strong> in the Marks Sheet tab.
+  1095→            </p>
+  1096→          </div>
+  1097→        )}
+  1098→
+  1099→        <DialogFooter>
+  1100→          <Button variant="outline" onClick={onClose}>Cancel</Button>
+  1101→          <Button
+  1102→            disabled={!valid || !classId || !subject || loading}
+  1103→            onClick={() => onSubmit({ name: name.trim(), examType, startDate, endDate, classId, subject, status, paperUrl })}
+  1104→          >
+  1105→            {loading ? 'Saving…' : mode === 'create' ? 'Create Exam' : 'Save Changes'}
+  1106→          </Button>
+  1107→        </DialogFooter>
+  1108→      </DialogContent>
+  1109→    </Dialog>
+  1110→  )
+  1111→}
+  1112→
+  1113→// ============================================================
+  1114→// Main module
+  1115→// ============================================================
+  1116→export function ExamsModule() {
+  1117→  const can = useCan()
+  1118→  const user = useStore((s) => s.user)
+  1119→  const canEnter = can('exams', 'enter')
+  1120→  const canCreate = can('exams', 'create')
+  1121→  const canEdit = can('exams', 'edit')
+  1122→  const canDelete = can('exams', 'delete')
+  1123→  const qc = useQueryClient()
+  1124→  // Students/parents: backend already scopes marks to their own/children's,
+  1125→  // so the class selector is meaningless for them — hide it.
+  1126→  const isStudentOrParent = user?.role === 'student' || user?.role === 'parent'
+  1127→
+  1128→  const examsQ = useQuery({ queryKey: ['exams', 'list'], queryFn: api.exams.list })
+  1129→  const classesQ = useQuery({ queryKey: ['academics', 'classes'], queryFn: api.academics.classes })
+  1130→
+  1131→  const exams = examsQ.data ?? []
+  1132→  const classes = classesQ.data ?? []
+  1133→
+  1134→  const [selectedId, setSelectedId] = useState<string>('')
+  1135→  const effectiveSelectedId = selectedId || (exams[0]?.id ?? '')
+  1136→  const selectedExam = exams.find((e) => e.id === effectiveSelectedId) || null
+  1137→
+  1138→  const [classId, setClassId] = useState<string>('')
+  1139→  // For staff: default to first class so the marks sheet is populated.
+  1140→  // For students/parents: leave empty — the backend scopes by role anyway.
+  1141→  // Use the exam's classId directly (no manual class selector)
+  1142→  const effectiveClassId = selectedExam?.classId || classId || ''
+  1143→
+  1144→  // CRUD state
+  1145→  const [examDialog, setExamDialog] = useState<{ mode: 'create' | 'edit'; target?: Exam } | null>(null)
+  1146→  const [examDelete, setExamDelete] = useState<Exam | null>(null)
+  1147→
+  1148→  const createExamMut = useMutation({
+  1149→    mutationFn: (data: any) => api.exams.create(data),
+  1150→    onSuccess: () => { qc.invalidateQueries({ queryKey: ['exams', 'list'] }); toast.success('Exam created'); setExamDialog(null) },
+  1151→    onError: (e: any) => toast.error('Failed to create exam: ' + e.message),
+  1152→  })
+  1153→  const updateExamMut = useMutation({
+  1154→    mutationFn: ({ id, data }: { id: string; data: any }) => api.exams.update(id, data),
+  1155→    onSuccess: () => { qc.invalidateQueries({ queryKey: ['exams', 'list'] }); toast.success('Exam updated'); setExamDialog(null) },
+  1156→    onError: (e: any) => toast.error('Failed to update exam: ' + e.message),
+  1157→  })
+  1158→  const deleteExamMut = useMutation({
+  1159→    mutationFn: (id: string) => api.exams.remove(id),
+  1160→    onSuccess: (_d, deletedId) => {
+  1161→      qc.invalidateQueries({ queryKey: ['exams', 'list'] })
+  1162→      toast.success('Exam deleted')
+  1163→      setExamDelete(null)
+  1164→      if (effectiveSelectedId === deletedId) setSelectedId('')
+  1165→    },
+  1166→    onError: (e: any) => toast.error('Failed to delete exam: ' + e.message),
+  1167→  })
+  1168→
+  1169→  // Quick status update
+  1170→  const statusMut = useMutation({
+  1171→    mutationFn: ({ id, status }: { id: string; status: string }) => api.exams.update(id, { status }),
+  1172→    onSuccess: () => { qc.invalidateQueries({ queryKey: ['exams', 'list'] }); toast.success('Exam status updated') },
+  1173→    onError: (e: any) => toast.error('Failed to update status: ' + e.message),
+  1174→  })
+  1175→
+  1176→  // Total stats
+  1177→  const totalExams = exams.length
+  1178→  const completedExams = exams.filter((e) => e.status === 'Completed').length
+  1179→  const totalMarksEntered = exams.reduce((acc, e) => acc + (e.marksCount ?? 0), 0)
+  1180→
+  1181→  return (
+  1182→    <div className="space-y-6">
+  1183→      <SectionHeader
+  1184→        title="Examinations & Results"
+  1185→        description="Manage exam schedules, enter marks, generate holistic progress cards, and analyse performance."
+  1186→      />
+  1187→
+  1188→      {/* Stat cards */}
+  1189→      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+  1190→        <StatCard
+  1191→          label="Total Exams"
+  1192→          value={totalExams}
+  1193→          sub="Across all academic years"
+  1194→          icon={ClipboardList}
+  1195→          accent="primary"
+  1196→          loading={examsQ.isLoading}
+  1197→        />
+  1198→        <StatCard
+  1199→          label="Completed Exams"
+  1200→          value={completedExams}
+  1201→          sub="Results published"
+  1202→          icon={CheckCircle2}
+  1203→          accent="emerald"
+  1204→          loading={examsQ.isLoading}
+  1205→        />
+  1206→        <StatCard
+  1207→          label="Marks Entered"
+  1208→          value={totalMarksEntered}
+  1209→          sub="Across all exams"
+  1210→          icon={FileBarChart2}
+  1211→          accent="violet"
+  1212→          loading={examsQ.isLoading}
+  1213→        />
+  1214→      </div>
+  1215→
+  1216→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+  1217→        {/* Left: exams list */}
+  1218→        <div className="lg:col-span-1 space-y-3">
+  1219→          <div className="flex items-center justify-between gap-2">
+  1220→            <h3 className="text-sm font-semibold flex items-center gap-2"><ClipboardList className="size-4 text-primary" /> Examinations</h3>
+  1221→            <div className="flex items-center gap-2">
+  1222→              <Badge variant="secondary" className="text-[11px]">{exams.length}</Badge>
+  1223→              {canCreate && (
+  1224→                <Button size="sm" className="h-8 text-xs" onClick={() => setExamDialog({ mode: 'create' })}>
+  1225→                  <Plus className="size-3.5" /> New Exam
+  1226→                </Button>
+  1227→              )}
+  1228→            </div>
+  1229→          </div>
+  1230→
+  1231→          {examsQ.isLoading ? (
+  1232→            <div className="space-y-2 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+  1233→              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
+  1234→            </div>
+  1235→          ) : examsQ.isError ? (
+  1236→            <Card><CardContent className="py-2"><EmptyState icon={RefreshCw} title="Failed to load exams" description="Please retry." /></CardContent></Card>
+  1237→          ) : exams.length === 0 ? (
+  1238→            <Card><CardContent className="py-2"><EmptyState icon={ClipboardList} title="No exams scheduled" description="Create exams in the academic setup to view them here." /></CardContent></Card>
+  1239→          ) : (
+  1240→            <div className="space-y-2 max-h-[70vh] overflow-y-auto scroll-thin pr-1">
+  1241→              {exams.map((e) => (
+  1242→                <ExamListItem
+  1243→                  key={e.id}
+  1244→                  exam={e}
+  1245→                  active={effectiveSelectedId === e.id}
+  1246→                  onClick={() => setSelectedId(e.id)}
+  1247→                  canEdit={canEdit}
+  1248→                  canDelete={canDelete}
+  1249→                  onEdit={() => setExamDialog({ mode: 'edit', target: e })}
+  1250→                  onDelete={() => setExamDelete(e)}
+  1251→                />
+  1252→              ))}
+  1253→            </div>
+  1254→          )}
+  1255→        </div>
+  1256→
+  1257→        {/* Right: detail pane */}
+  1258→        <div className="lg:col-span-2">
+  1259→          {!selectedExam ? (
+  1260→            <Card className="h-full grid place-items-center">
+  1261→              <CardContent className="py-2">
+  1262→                <EmptyState icon={ClipboardList} title="Select an exam" description="Pick an exam from the left to view marks, progress cards, and analysis." />
+  1263→              </CardContent>
+  1264→            </Card>
+  1265→          ) : (
+  1266→            <div className="space-y-4">
+  1267→              {/* Exam header + details + status selector */}
+  1268→              <Card className="p-4 bg-gradient-to-br from-primary/5 to-transparent border-primary/20">
+  1269→                <div className="flex flex-wrap items-start justify-between gap-3">
+  1270→                  <div className="flex items-center gap-3">
+  1271→                    <div className="size-11 rounded-xl bg-primary text-primary-foreground grid place-items-center">
+  1272→                      <ClipboardList className="size-6" />
+  1273→                    </div>
+  1274→                    <div>
+  1275→                      <p className="font-semibold text-base">{selectedExam.name}</p>
+  1276→                      <p className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+  1277→                        <CalendarDays className="size-3" /> {fmtRange(selectedExam.startDate, selectedExam.endDate)}
+  1278→                      </p>
+  1279→                    </div>
+  1280→                  </div>
+  1281→                  <div className="flex items-center gap-2 flex-wrap">
+  1282→                    <Badge variant="outline" className="gap-1 text-[11px]"><BookOpen className="size-3" /> {selectedExam.examType}</Badge>
+  1283→                    {selectedExam.subject && (
+  1284→                      <Badge variant="outline" className="gap-1 text-[11px]"><FileText className="size-3" /> {selectedExam.subject}</Badge>
+  1285→                    )}
+  1286→                    {selectedExam.classes && selectedExam.classes.length > 0 && (
+  1287→                      <Badge variant="outline" className="gap-1 text-[11px]"><GraduationCap className="size-3" /> {selectedExam.classes.map((c: any) => c.name).join(', ')}</Badge>
+  1288→                    )}
+  1289→                    <Badge variant="secondary" className="text-[11px] gap-1"><Hash className="size-3" /> {selectedExam.marksCount ?? 0}</Badge>
+  1290→                    {selectedExam.paperUrl && (
+  1291→                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => toast.info('Downloading exam paper…')}>
+  1292→                        <Download className="size-3" /> Paper
+  1293→                      </Button>
+  1294→                    )}
+  1295→                  </div>
+  1296→                </div>
+  1297→                {/* Status selector row */}
+  1298→                <div className="flex items-center gap-2 mt-3 pt-3 border-t">
+  1299→                  <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+  1300→                    <Activity className="size-3.5" /> Status
+  1301→                  </span>
+  1302→                  {canEdit ? (
+  1303→                    <Select
+  1304→                      value={selectedExam.status}
+  1305→                      onValueChange={(v) => statusMut.mutate({ id: selectedExam.id, status: v })}
+  1306→                      disabled={statusMut.isPending}
+  1307→                    >
+  1308→                      <SelectTrigger size="sm" className="w-40">
+  1309→                        <SelectValue />
+  1310→                      </SelectTrigger>
+  1311→                      <SelectContent>
+  1312→                        <SelectItem value="Scheduled">Scheduled</SelectItem>
+  1313→                        <SelectItem value="Ongoing">Ongoing</SelectItem>
+  1314→                        <SelectItem value="Completed">Completed</SelectItem>
+  1315→                      </SelectContent>
+  1316→                    </Select>
+  1317→                  ) : (
+  1318→                    <StatusBadge status={selectedExam.status} />
+  1319→                  )}
+  1320→                  {canEnter && selectedExam.status === 'Completed' && (
+  1321→                    <Badge variant="outline" className="ml-auto text-[10px] gap-1 text-emerald-700 dark:text-emerald-400">
+  1322→                      <CheckCircle2 className="size-3" /> Marks entry unlocked
+  1323→                    </Badge>
+  1324→                  )}
+  1325→                  {canEnter && selectedExam.status !== 'Completed' && (
+  1326→                    <Badge variant="outline" className="ml-auto text-[10px] gap-1 text-amber-700 dark:text-amber-400">
+  1327→                      <AlertCircle className="size-3" /> Set to Completed to enter marks
+  1328→                    </Badge>
+  1329→                  )}
+  1330→                </div>
+  1331→              </Card>
+  1332→
+  1333→              <Tabs defaultValue="marks">
+  1334→                <TabsList>
+  1335→                  <TabsTrigger value="marks" className="gap-1.5"><FileBarChart2 className="size-4" /> Marks Sheet</TabsTrigger>
+  1336→                  <TabsTrigger value="progress" className="gap-1.5"><FileText className="size-4" /> Progress Card</TabsTrigger>
+  1337→                  <TabsTrigger value="analysis" className="gap-1.5"><Percent className="size-4" /> Analysis</TabsTrigger>
+  1338→                </TabsList>
+  1339→
+  1340→                <TabsContent value="marks" className="mt-4">
+  1341→                  <MarksSheetTab exam={selectedExam} classId={effectiveClassId} canEnter={canEnter && selectedExam.status === 'Completed'} />
+  1342→                  {canEnter && selectedExam.status !== 'Completed' && (
+  1343→                    <div className="mt-3 flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+  1344→                      <AlertCircle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+  1345→                      <p className="text-xs text-amber-700 dark:text-amber-400">
+  1346→                        Marks entry is locked. Set the exam status to <strong>"Completed"</strong> to unlock marks entry for this exam.
+  1347→                      </p>
+  1348→                    </div>
+  1349→                  )}
+  1350→                </TabsContent>
+  1351→
+  1352→                <TabsContent value="progress" className="mt-4">
+  1353→                  <ProgressCardTab exam={selectedExam} classId={effectiveClassId} />
+  1354→                </TabsContent>
+  1355→
+  1356→                <TabsContent value="analysis" className="mt-4">
+  1357→                  <AnalysisTab exam={selectedExam} classId={effectiveClassId} />
+  1358→                </TabsContent>
+  1359→              </Tabs>
+  1360→            </div>
+  1361→          )}
+  1362→        </div>
+  1363→      </div>
+  1364→
+  1365→      {examDialog && (
+  1366→        <ExamDialog
+  1367→          mode={examDialog.mode}
+  1368→          target={examDialog.target}
+  1369→          loading={createExamMut.isPending || updateExamMut.isPending}
+  1370→          onClose={() => setExamDialog(null)}
+  1371→          classes={classes}
+  1372→          onSubmit={(data) => {
+  1373→            if (examDialog.mode === 'edit' && examDialog.target) {
+  1374→              updateExamMut.mutate({ id: examDialog.target.id, data })
+  1375→            } else {
+  1376→              createExamMut.mutate(data)
+  1377→            }
+  1378→          }}
+  1379→        />
+  1380→      )}
+  1381→
+  1382→      {examDelete && (
+  1383→        <AlertDialog open onOpenChange={(o) => { if (!o) setExamDelete(null) }}>
+  1384→          <AlertDialogContent>
+  1385→            <AlertDialogHeader>
+  1386→              <AlertDialogTitle>Delete exam?</AlertDialogTitle>
+  1387→              <AlertDialogDescription>
+  1388→                This will permanently delete <strong>{examDelete.name}</strong> ({examDelete.examType}, {fmtRange(examDelete.startDate, examDelete.endDate)}) along with all marks entered for it. This action cannot be undone.
+  1389→              </AlertDialogDescription>
+  1390→            </AlertDialogHeader>
+  1391→            <AlertDialogFooter>
+  1392→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1393→              <AlertDialogAction
+  1394→                className="bg-rose-600 hover:bg-rose-700 text-white"
+  1395→                onClick={() => deleteExamMut.mutate(examDelete.id)}
+  1396→                disabled={deleteExamMut.isPending}
+  1397→              >
+  1398→                {deleteExamMut.isPending ? 'Deleting…' : 'Yes, delete'}
+  1399→              </AlertDialogAction>
+  1400→            </AlertDialogFooter>
+  1401→          </AlertDialogContent>
+  1402→        </AlertDialog>
+  1403→      )}
+  1404→    </div>
+  1405→  )
+  1406→}
+  1407→
