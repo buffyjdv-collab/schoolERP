@@ -25,7 +25,7 @@ export const api = {
     me: () => jfetch<any>('/api/dashboard/me'),
   },
   students: {
-    list: (params?: { q?: string; classId?: string; status?: string }) => {
+    list: (params?: { q?: string; classId?: string; sectionId?: string; status?: string }) => {
       const s = new URLSearchParams(params as any).toString()
       return jfetch<Student[]>(`/api/students${s ? '?' + s : ''}`)
     },
@@ -92,6 +92,8 @@ export const api = {
       return jfetch<ExamMark[]>(`/api/exams/marks?${s}`)
     },
     enterMarks: (data: any) => jfetch<any>('/api/exams/marks/enter', { method: 'POST', body: JSON.stringify(data) }),
+    batchSaveMarks: (data: { examId: string; subject: string; maxMarks: number; entries: { studentId: string; obtained: number | null }[] }) =>
+      jfetch<any>('/api/exams/marks/batch', { method: 'POST', body: JSON.stringify(data) }),
     deleteMarks: (id: string) => jfetch<any>(`/api/exams/marks/${id}`, { method: 'DELETE' }),
   },
   transport: {

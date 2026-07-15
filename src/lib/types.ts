@@ -145,6 +145,12 @@ export interface Exam {
   endDate: string
   status: string
   marksCount?: number
+  subject?: string | null
+  classId?: string | null
+  paperUrl?: string | null
+  maxMarks?: number
+  createdById?: string | null
+  classes?: { id: string; name: string }[]
 }
 
 export interface ExamMark {

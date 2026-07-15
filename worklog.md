@@ -706,3 +706,59 @@ Stage Summary:
 - All 5 roles now work correctly: super_admin (full), admin (full), transport_manager (transport+students+communication), teacher (academic modules), parent (children's modules).
 - The root cause was corrupted syntax in rbac.ts that broke the permission resolution for all non-super_admin roles.
 - ESLint: 0 errors. All API tests pass. Browser sidebars verified for all 3 roles.
+
+---
+Task ID: exam-full-rebuild
+Agent: main
+Task: Rebuild examinations module with: (1) Exam creation with subject, class, max marks, question paper upload, status=Scheduled. (2) Side panel with status selector (Ongoing/Completed) + section selector + marks entry only when Completed. (3) Batch save marks (no auto-save) — Save All button. (4) Modern progress card on student name click — admin + class teacher only, all-subjects-entered check, downloadable.
+
+Work Log:
+- **Prisma schema**: Added `subject`, `classId`, `paperUrl`, `maxMarks` (Float @default(100)), `createdById` to Exam model. Ran `db:push`.
+- **Types**: Extended `Exam` interface with all new optional fields.
+- **API routes**:
+  - `GET /api/exams` — returns subject, classId, paperUrl, maxMarks, createdById, classes.
+  - `POST /api/exams` — accepts all new fields; status forced to 'Scheduled'; maxMarks defaults to 100.
+  - `PATCH /api/exams/[id]` — accepts status + all fields for editing.
+  - `GET /api/students` — added `sectionId` query param filter.
+  - `POST /api/exams/marks/batch` — NEW batch save endpoint. Body: `{ examId, subject, maxMarks, entries: [{ studentId, obtained }] }`. Upserts all marks in a transaction.
+- **API client**: Added `sectionId` to `students.list()` params; added `exams.batchSaveMarks()` method.
+- **ExamDialog** (create/edit): Fields — Exam Name, Class (select), Subject (select, class-dependent), Exam Type, Max Marks (number, default 100), Status (disabled "Scheduled" on create), Start/End dates, Question Paper upload. Info banner: "New exams are created with status Scheduled. Update to Ongoing/Completed from the side panel."
+- **Exam detail card** (side panel):
+  - Header with exam name, date range, type/subject/maxMarks/marksCount badges, paper download.
+  - Status selector (Scheduled/Ongoing/Completed) — inline Select, calls PATCH on change.
+  - Section selector — staff only, shows "All Sections" + each section with student count. Resets when exam changes.
+  - "Marks entry unlocked" / "Set to Completed to enter marks" badges.
+- **MarksSheetTab** (batch entry, no auto-save):
+  - `draftMarks` local state: `{ [studentId]: { [subject]: string } }`.
+  - "Enter Marks" button → initializes draft from existing marks, enters edit mode.
+  - Edit mode shows number inputs for each student × subject cell.
+  - "Save All (N)" button — N = count of students with ALL subjects filled. Disabled when N=0.
+  - "Cancel" button — exits edit mode without saving.
+  - Entry stats badges: "N ready" (green), "N partial" (amber), "N total".
+  - On Save All: calls `batchSaveMarks` for each subject in parallel, invalidates queries, shows toast, exits edit mode.
+  - Always seeds rows from section student list (entry rows persist after save).
+  - Student names are clickable buttons (eye icon on hover).
+- **StudentProgressSheet** (modern UI, right-side drawer):
+  - Gradient header (emerald/teal) with school name + exam info + decorative blurs.
+  - Overall summary tiles: Overall %, Grade, Attendance (gradient backgrounds).
+  - Scholastic area table (subject, max, obtained, %, grade) with color-coded cells.
+  - Radar chart of subject performance.
+  - **All-subjects check**: `allSubjectsCount` = 1 if exam has a specific subject, else class's subject count. Sheet shows "Progress card locked" with count if not all subjects entered.
+  - **Access control**: `canViewProgress` = admin/super_admin OR teacher who teaches the exam's class. Non-authorized users: `onOpenProgress` is a no-op.
+  - **Downloadable**: Download PDF button shown only when `canDownload` (canViewProgress) is true.
+  - Footer: "All N subjects' marks have been entered for this student."
+- Fixed Prisma client staleness: had to kill stale `next-server` process (PID 1045) holding port 3000, clear `.next`, and restart fresh.
+
+Browser verification (admin Tara Menon):
+1. **Exam creation**: Created "Math Unit Test 1" — Class 1, Mathematics, Unit Test, Max Marks 50, Scheduled, dates 10–15 Dec 2026. Appeared in list with subject/maxMarks badges. ✅
+2. **Status + section selectors**: Detail card showed status dropdown (Scheduled→Completed) and section dropdown (All Sections / A·11 / B·12 / C·11). ✅
+3. **Batch marks entry**: Selected Section A (11 students). Clicked "Enter Marks" → 11 inputs appeared. Filled all 11 (40,43,46,...70). "Save All (11)" button + "11 ready" badge. Clicked Save All → toast "Marks saved for 11 students", exited edit mode, marks displayed read-only. ✅ No auto-save — marks only saved on Save All click.
+4. **Progress card — locked**: Clicked student on Mid Term exam (no classId) → "Progress card locked. Marks for all 0 subjects must be entered." (Fixed: exams with specific subject now use count=1.)
+5. **Progress card — unlocked**: Clicked Vivaan Sharma on Math Unit Test 1 (subject=Mathematics, 1 subject, all marks entered) → full modern progress card: gradient header, summary tiles (Overall 140%, Grade A+, Attendance), scholastic table (Mathematics: 70/50), radar chart, "All 1 subjects' marks have been entered", Download PDF button. ✅
+
+Stage Summary:
+- Exam creation now captures subject, class, max marks, question paper upload, with status forced to Scheduled.
+- Side panel allows status updates (Scheduled/Ongoing/Completed) and section selection. Marks entry only enabled when status=Completed.
+- Marks entry uses batch save — no auto-save. Teachers fill all students' marks, then click "Save All". Counter shows how many students are ready.
+- Progress card (modern UI) opens on student name click. Only admin + class teacher can view/download. Card is locked until ALL subjects' marks are entered for that student.
+- Lint: 0 errors. Dev server running on port 3000.

@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const q = searchParams.get('q') || ''
   const classId = searchParams.get('classId') || undefined
+  const sectionId = searchParams.get('sectionId') || undefined
   const status = searchParams.get('status') || undefined
 
   // Build role-scoped filter
@@ -29,6 +30,7 @@ export async function GET(req: NextRequest) {
         scopeWhere,
         q ? { OR: [{ firstName: { contains: q } }, { lastName: { contains: q } }, { admissionNo: { contains: q } }, { parentPhone: { contains: q } }] } : {},
         classId ? { classId } : {},
+        sectionId ? { sectionId } : {},
         status ? { status } : {},
       ],
     },

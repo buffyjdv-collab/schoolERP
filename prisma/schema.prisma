@@ -203,7 +203,12 @@ model Exam {
   examType       String // Unit Test, Mid Term, Final, Online
   startDate      DateTime
   endDate        DateTime
-  status         String       @default("Scheduled")
+  status         String       @default("Scheduled") // Scheduled, Ongoing, Completed
+  subject        String?      // subject for this exam
+  classId        String?      // class this exam is for
+  paperUrl       String?      // uploaded exam paper URL
+  maxMarks       Float        @default(100) // maximum marks for this exam (per subject)
+  createdById    String?      // teacher who created it
   classes        ExamClass[]
   marks          ExamMark[]
   createdAt      DateTime     @default(now())
