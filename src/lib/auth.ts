@@ -6,19 +6,28 @@ import { db } from './db'
 import { canUser, setRoleOverridesCache, supportsPerUserOverrides, supportsPerUserDataScope, getRoleOverrides } from './rbac'
 import type { AuthUser, Role, ModuleId, Action, UserOverrides, ModuleOverride, DataScope, RoleOverrides, RoleOverride } from './rbac'
 
-const SECRET = process.env.AUTH_SECRET || 'vidyamatrix-dev-secret-9f3k2j'
 const COOKIE_NAME = 'erp_session'
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+// Lazy secret resolution — only checked at request time (not during build).
+// In production, AUTH_SECRET must be set. In dev, a default is used for convenience.
+function getSecret(): string {
+  if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('AUTH_SECRET environment variable is required in production')
+  }
+  return 'vidyamatrix-dev-secret-9f3k2j'
+}
+
 function sign(payload: string): string {
-  const sig = createHmac('sha256', SECRET).update(payload).digest('hex')
+  const sig = createHmac('sha256', getSecret()).update(payload).digest('hex')
   return `${payload}.${sig}`
 }
 
 function verifyToken(token: string): { uid: string; exp: number } | null {
   const [payload, sig] = token.split('.')
   if (!payload || !sig) return null
-  const expected = createHmac('sha256', SECRET).update(payload).digest('hex')
+  const expected = createHmac('sha256', getSecret()).update(payload).digest('hex')
   if (sig !== expected) return null
   try {
     const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString()) as { uid: string; exp: number }
