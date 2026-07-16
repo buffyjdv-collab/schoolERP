@@ -95,18 +95,18 @@ export function Sidebar() {
                     className={cn(
                       'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all group relative',
                       active
-                        ? 'bg-primary/10 text-primary shadow-sm'
-                        : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                        ? 'bg-white/60 text-sidebar-primary shadow-sm'
+                        : 'text-sidebar-foreground/70 hover:bg-white/40 hover:text-sidebar-foreground',
                       sidebarCollapsed && 'justify-center'
                     )}
                   >
-                    <Icon className={cn('size-[18px] shrink-0 transition-colors', active ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground')} />
+                    <Icon className={cn('size-[18px] shrink-0 transition-colors', active ? 'text-sidebar-primary' : 'text-sidebar-foreground/60 group-hover:text-sidebar-foreground')} />
                     {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
                     {!sidebarCollapsed && item.badge && (
-                      <Badge variant="secondary" className="ml-auto text-[9px] px-1.5 py-0 h-4 bg-primary/15 text-primary">{item.badge}</Badge>
+                      <Badge variant="secondary" className="ml-auto text-[9px] px-1.5 py-0 h-4 bg-sidebar-primary/15 text-sidebar-primary">{item.badge}</Badge>
                     )}
                     {sidebarCollapsed && item.badge && (
-                      <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" />
+                      <span className="absolute top-1 right-1 size-1.5 rounded-full bg-sidebar-primary" />
                     )}
                   </button>
                 )
