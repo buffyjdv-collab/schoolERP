@@ -49,24 +49,24 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300 shrink-0',
+        'flex flex-col bg-sidebar transition-all duration-300 shrink-0 rounded-r-[20px] overflow-hidden',
         sidebarCollapsed ? 'w-[68px]' : 'w-[260px]'
       )}
     >
       {/* Brand */}
       <div className="h-16 flex items-center gap-3 px-4 border-b border-sidebar-border shrink-0">
-        <div className="size-9 rounded-xl bg-gradient-to-br from-primary to-emerald-600 grid place-items-center shrink-0 shadow-sm shadow-primary/30">
-          <School className="size-5 text-primary-foreground" />
+        <div className="size-9 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 grid place-items-center shrink-0 shadow-sm shadow-black/20">
+          <School className="size-5 text-white" />
         </div>
         {!sidebarCollapsed && (
           <div className="min-w-0">
             <div className="font-bold text-[15px] leading-tight text-sidebar-foreground truncate">Vidyamatrix</div>
-            <div className="text-[10px] text-muted-foreground tracking-wider uppercase">School ERP</div>
+            <div className="text-[10px] text-sidebar-foreground/60 tracking-wider uppercase">School ERP</div>
           </div>
         )}
         <button
           onClick={toggleSidebar}
-          className="ml-auto p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground transition-colors"
+          className="ml-auto p-1.5 rounded-md hover:bg-sidebar-accent text-sidebar-foreground/70 transition-colors"
           aria-label="Toggle sidebar"
         >
           <ChevronLeft className={cn('size-4 transition-transform', sidebarCollapsed && 'rotate-180')} />
@@ -81,7 +81,7 @@ export function Sidebar() {
           return (
           <div key={group}>
             {!sidebarCollapsed && (
-              <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">{group}</div>
+              <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">{group}</div>
             )}
             <div className="space-y-0.5">
               {groupItems.map((item) => {
@@ -95,18 +95,18 @@ export function Sidebar() {
                     className={cn(
                       'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all group relative',
                       active
-                        ? 'bg-white/60 text-sidebar-primary shadow-sm'
-                        : 'text-sidebar-foreground/70 hover:bg-white/40 hover:text-sidebar-foreground',
+                        ? 'bg-white/15 text-white shadow-sm'
+                        : 'text-sidebar-foreground/70 hover:bg-white/10 hover:text-white',
                       sidebarCollapsed && 'justify-center'
                     )}
                   >
-                    <Icon className={cn('size-[18px] shrink-0 transition-colors', active ? 'text-sidebar-primary' : 'text-sidebar-foreground/60 group-hover:text-sidebar-foreground')} />
+                    <Icon className={cn('size-[18px] shrink-0 transition-colors', active ? 'text-white' : 'text-sidebar-foreground/60 group-hover:text-white')} />
                     {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
                     {!sidebarCollapsed && item.badge && (
-                      <Badge variant="secondary" className="ml-auto text-[9px] px-1.5 py-0 h-4 bg-sidebar-primary/15 text-sidebar-primary">{item.badge}</Badge>
+                      <Badge variant="secondary" className="ml-auto text-[9px] px-1.5 py-0 h-4 bg-emerald-400/20 text-emerald-200">{item.badge}</Badge>
                     )}
                     {sidebarCollapsed && item.badge && (
-                      <span className="absolute top-1 right-1 size-1.5 rounded-full bg-sidebar-primary" />
+                      <span className="absolute top-1 right-1 size-1.5 rounded-full bg-emerald-400" />
                     )}
                   </button>
                 )
@@ -120,11 +120,11 @@ export function Sidebar() {
       {/* Footer */}
       {!sidebarCollapsed && (
         <div className="p-3 border-t border-sidebar-border shrink-0">
-          <div className="rounded-xl bg-gradient-to-br from-primary/10 to-emerald-500/5 p-3 text-xs border border-primary/10">
-            <div className="font-semibold text-foreground mb-0.5">Academic Year</div>
-            <div className="text-muted-foreground">2026–27 · Active</div>
-            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="rounded-xl bg-white/10 p-3 text-xs border border-white/5">
+            <div className="font-semibold text-white mb-0.5">Academic Year</div>
+            <div className="text-sidebar-foreground/70">2026–27 · Active</div>
+            <div className="mt-2 flex items-center gap-1.5 text-[10px] text-sidebar-foreground/70">
+              <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
               All systems operational
             </div>
           </div>

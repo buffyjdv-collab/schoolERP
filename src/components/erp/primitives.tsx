@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { LucideIcon } from 'lucide-react'
 
 // Pastel backgrounds for stat cards — top row only
-const STAT_BG_COLORS = ['#D8EAE8', '#FCECD3', '#E2F0D9']
+const STAT_BG_COLORS = ['#D8EAE8', '#FCECD3', '#FBEBED', '#E2F0D9']
 
 function useStatBg() {
   const id = useId()
