@@ -1,9 +1,19 @@
 'use client'
 
+import { useId } from 'react'
 import { cn } from '@/lib/utils'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { LucideIcon } from 'lucide-react'
+
+// Pastel backgrounds for stat cards — top row only
+const STAT_BG_COLORS = ['#D8EAE8', '#FCECD3', '#E2F0D9']
+
+function useStatBg() {
+  const id = useId()
+  const hash = id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
+  return STAT_BG_COLORS[hash % STAT_BG_COLORS.length]
+}
 
 export function StatCard({
   label, value, sub, icon: Icon, accent = 'primary', loading, trend,
@@ -16,6 +26,7 @@ export function StatCard({
   loading?: boolean
   trend?: { value: string; up: boolean }
 }) {
+  const bgColor = useStatBg()
   const accentMap: Record<string, string> = {
     primary: 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm shadow-emerald-500/30',
     emerald: 'bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-sm shadow-emerald-500/30',
@@ -34,7 +45,7 @@ export function StatCard({
     )
   }
   return (
-    <Card className="p-5 relative overflow-hidden group hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5">
+    <Card className="p-5 relative overflow-hidden group hover:shadow-card-hover transition-all duration-300 hover:-translate-y-0.5" style={{ backgroundColor: bgColor }}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
