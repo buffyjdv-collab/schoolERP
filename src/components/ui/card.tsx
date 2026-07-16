@@ -2,12 +2,24 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Card({ className, ...props }: React.ComponentProps<"div">) {
+// Pastel card backgrounds — one is picked per Card instance (stable via useId)
+const CARD_BG_COLORS = ["#7AE5E3", "#FCECD3", "#E2F0D9"]
+
+function useCardBg() {
+  const id = React.useId()
+  // Derive a stable index from the useId hash so it doesn't flicker on re-render
+  const hash = id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0)
+  return CARD_BG_COLORS[hash % CARD_BG_COLORS.length]
+}
+
+function Card({ className, style, ...props }: React.ComponentProps<"div">) {
+  const bgColor = useCardBg()
   return (
     <div
       data-slot="card"
+      style={{ backgroundColor: bgColor, ...style }}
       className={cn(
-        "bg-card text-card-foreground flex flex-col gap-6 rounded-2xl border-0 py-6 shadow-card transition-shadow",
+        "text-card-foreground flex flex-col gap-6 rounded-2xl border-0 py-6 shadow-card transition-shadow",
         className
       )}
       {...props}
