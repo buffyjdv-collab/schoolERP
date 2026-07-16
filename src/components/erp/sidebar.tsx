@@ -55,7 +55,7 @@ export function Sidebar() {
     >
       {/* Brand */}
       <div className="h-16 flex items-center gap-3 px-4 border-b border-sidebar-border shrink-0">
-        <div className="size-9 rounded-xl bg-primary grid place-items-center shrink-0 shadow-sm">
+        <div className="size-9 rounded-xl bg-gradient-to-br from-primary to-emerald-600 grid place-items-center shrink-0 shadow-sm shadow-primary/30">
           <School className="size-5 text-primary-foreground" />
         </div>
         {!sidebarCollapsed && (
@@ -93,14 +93,14 @@ export function Sidebar() {
                     onClick={() => setModule(item.id)}
                     title={sidebarCollapsed ? item.label : undefined}
                     className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all group relative',
+                      'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all group relative',
                       active
-                        ? 'bg-primary text-primary-foreground shadow-sm'
-                        : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                        ? 'bg-primary/10 text-primary shadow-sm'
+                        : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                       sidebarCollapsed && 'justify-center'
                     )}
                   >
-                    <Icon className={cn('size-[18px] shrink-0', active ? 'text-primary-foreground' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground')} />
+                    <Icon className={cn('size-[18px] shrink-0 transition-colors', active ? 'text-primary' : 'text-muted-foreground group-hover:text-sidebar-accent-foreground')} />
                     {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
                     {!sidebarCollapsed && item.badge && (
                       <Badge variant="secondary" className="ml-auto text-[9px] px-1.5 py-0 h-4 bg-primary/15 text-primary">{item.badge}</Badge>
@@ -120,7 +120,7 @@ export function Sidebar() {
       {/* Footer */}
       {!sidebarCollapsed && (
         <div className="p-3 border-t border-sidebar-border shrink-0">
-          <div className="rounded-lg bg-gradient-to-br from-primary/10 to-primary/5 p-3 text-xs">
+          <div className="rounded-xl bg-gradient-to-br from-primary/10 to-emerald-500/5 p-3 text-xs border border-primary/10">
             <div className="font-semibold text-foreground mb-0.5">Academic Year</div>
             <div className="text-muted-foreground">2026–27 · Active</div>
             <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">

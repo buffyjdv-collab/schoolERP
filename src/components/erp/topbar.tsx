@@ -75,7 +75,7 @@ export function Topbar() {
   }
 
   return (
-    <header className="h-16 border-b bg-background/80 backdrop-blur-sm flex items-center gap-3 px-4 lg:px-6 shrink-0 z-20">
+    <header className="h-16 border-b border-border/60 bg-card/80 backdrop-blur-md flex items-center gap-3 px-4 lg:px-6 shrink-0 z-20">
       <div className="min-w-0">
         <h1 className="text-base font-semibold leading-tight truncate">{moduleTitles[activeModule] || 'Vidyamatrix ERP'}</h1>
         <p className="text-[11px] text-muted-foreground hidden sm:block">{now}</p>
@@ -85,7 +85,7 @@ export function Topbar() {
         <Search className="absolute left-3 size-4 text-muted-foreground pointer-events-none" />
         <Input
           placeholder={user?.role === 'student' ? 'Search your records…' : user?.role === 'parent' ? "Search your children's records…" : 'Search students, staff, invoices…'}
-          className="pl-9 h-9 bg-muted/50 border-transparent focus-visible:border-border"
+          className="pl-9 h-9 bg-muted/40 border-transparent focus-visible:border-primary/40 focus-visible:bg-card rounded-xl"
           onChange={(e) => setSearchQuery(e.target.value)}
         />
         <kbd className="absolute right-2 text-[10px] text-muted-foreground border rounded px-1.5 py-0.5 hidden lg:block">⌘K</kbd>
