@@ -1,16 +1,15 @@
 // Enterprise School ERP Schema (Vidyalaya-style)
 // Master entities: Student, Employee, Class, Section, Subject, Vehicle, Book, Asset
-// Database: PostgreSQL (Neon) — production schema
-// For local SQLite dev, use: prisma generate --schema=prisma/schema.dev.prisma
+// Database: SQLite — local development schema
+
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
 }
 
 // ============ ACADEMIC STRUCTURE ============
